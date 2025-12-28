@@ -414,6 +414,7 @@ def delete_resource(
         if not (user.role == "teacher" and r.owner_user_id == user.id and r.status == "draft"):
             raise permission_denied()
 
+    db.execute(resource_tags.delete().where(resource_tags.c.resource_id == r.id))
     db.delete(r)
     db.commit()
     return no_content()

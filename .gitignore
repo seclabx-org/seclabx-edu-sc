@@ -12,3 +12,6 @@ docs-private/
 
 # Local config directory (user-specific, not tracked)
 config-local/
+
+
+test/

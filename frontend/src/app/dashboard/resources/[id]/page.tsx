@@ -4,10 +4,12 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { resourceApi, uploadFile } from "../../../../lib/api";
+import { useAuthGuard } from "../../../../lib/useAuthGuard";
 
 export default function ResourceDetailPage() {
   const params = useParams();
   const id = Number(params?.id);
+  const { user, loading } = useAuthGuard();
   const [data, setData] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -61,6 +63,7 @@ export default function ResourceDetailPage() {
     }
   };
 
+  if (loading) return <p className="text-sm text-slate-600">正在校验登录状态...</p>;
   if (error) {
     return (
       <div className="rounded border bg-white p-4">
@@ -71,8 +74,9 @@ export default function ResourceDetailPage() {
       </div>
     );
   }
-
   if (!data) return <p className="text-sm text-slate-600">加载中...</p>;
+
+  const isAdmin = user?.role === "admin";
 
   return (
     <div className="space-y-4">
@@ -87,12 +91,12 @@ export default function ResourceDetailPage() {
               下载
             </button>
           )}
-          {data.status !== "published" && (
+          {isAdmin && data.status !== "published" && (
             <button onClick={handlePublish} className="rounded-md bg-brand px-3 py-2 text-sm text-white">
               发布
             </button>
           )}
-          {data.status !== "archived" && (
+          {isAdmin && data.status !== "archived" && (
             <button onClick={handleArchive} className="rounded-md bg-slate-800 px-3 py-2 text-sm text-white">
               下架
             </button>

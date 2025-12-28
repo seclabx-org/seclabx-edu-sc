@@ -31,6 +31,7 @@ export async function login(username: string, password: string) {
   });
   if (typeof window !== "undefined") {
     localStorage.setItem("token", data.access_token);
+    window.dispatchEvent(new Event("auth-changed"));
   }
   return data;
 }

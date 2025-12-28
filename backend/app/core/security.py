@@ -18,8 +18,12 @@ def verify_password(password: str, password_hash: str) -> bool:
 
 
 def create_access_token(subject: dict, expires_in_seconds: int | None = None) -> str:
+    """
+    subject: {"id": int, "role": str}
+    PyJWT requires `sub` to be a string, so we keep `role` as a separate claim.
+    """
     exp = int(time.time()) + int(expires_in_seconds or settings.ACCESS_TOKEN_EXPIRES_SECONDS)
-    payload = {"sub": subject, "exp": exp}
+    payload = {"sub": str(subject.get("id")), "role": subject.get("role"), "exp": exp}
     return jwt.encode(payload, settings.JWT_SECRET, algorithm=settings.JWT_ALG)
 
 

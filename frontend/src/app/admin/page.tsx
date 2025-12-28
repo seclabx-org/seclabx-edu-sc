@@ -1,26 +1,45 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { adminApi } from "../../lib/api";
-import Link from "next/link";
+import { useAuthGuard } from "../../lib/useAuthGuard";
 
 export default function AdminPage() {
+  const { user, loading } = useAuthGuard({ requiredRole: "admin" });
   const [users, setUsers] = useState<any[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!user) return;
     adminApi
       .users()
       .then((data) => setUsers(data.items || []))
       .catch((e: any) => setError(e.message || "需要管理员权限"));
-  }, []);
+  }, [user]);
+
+  if (loading) {
+    return (
+      <div className="rounded border bg-white p-4 text-sm text-slate-600">
+        正在校验登录状态...
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className="rounded border bg-white p-4 text-sm text-slate-600">
+        正在跳转到登录页...
+      </div>
+    );
+  }
 
   if (error) {
     return (
       <div className="rounded border bg-white p-4">
         <p className="text-sm text-red-600">{error}</p>
         <Link href="/login" className="text-brand">
-          去登录
+          重新登录
         </Link>
       </div>
     );

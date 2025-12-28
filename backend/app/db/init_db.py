@@ -1,15 +1,22 @@
+import time
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 from app.db.session import engine, SessionLocal
 from app.models.base import Base
 from app.models.user import User
 from app.models.meta import ProfessionalGroup, Major, IdeologyTag, Course
+from app.models.resource import Resource  # noqa: F401 - ensure table registered
+from app.models.download import DownloadLog  # noqa: F401 - ensure table registered
 from app.core.security import hash_password
 
 
+GROUP_NAME = "信息安全技术应用专业群"
+
+
 def seed(db: Session):
-    g = db.query(ProfessionalGroup).filter(ProfessionalGroup.name == "信息安全技术应用专业群").first()
+    g = db.query(ProfessionalGroup).filter(ProfessionalGroup.name == GROUP_NAME).first()
     if not g:
-        g = ProfessionalGroup(name="信息安全技术应用专业群", code="sec_cluster", is_active=True)
+        g = ProfessionalGroup(name=GROUP_NAME, code="sec_cluster", is_active=True)
         db.add(g)
         db.flush()
 
@@ -31,7 +38,6 @@ def seed(db: Session):
         if not t:
             db.add(IdeologyTag(name=name, sort_order=order, is_active=True))
 
-    # seed demo courses for first major
     major_one = db.query(Major).filter(Major.name == "信息安全技术应用").first()
     if major_one:
         courses = [
@@ -58,7 +64,21 @@ def seed(db: Session):
     db.commit()
 
 
+def wait_for_db(max_retries: int = 30, delay_seconds: int = 2):
+    """Loop until DB is reachable to avoid container start flapping when Postgres is not ready."""
+    for attempt in range(1, max_retries + 1):
+        try:
+            with engine.connect() as conn:
+                conn.execute(text("SELECT 1"))
+                return
+        except Exception:
+            if attempt == max_retries:
+                raise
+            time.sleep(delay_seconds)
+
+
 def main():
+    wait_for_db()
     Base.metadata.create_all(bind=engine)
     db = SessionLocal()
     try:

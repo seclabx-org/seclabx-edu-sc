@@ -2,10 +2,13 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
+from app.core.logging import setup_logging
 from app.core.request_id import RequestIdMiddleware
 from app.core.response import err
 from app.core.errors import AppError
 from app.api.routes import auth, meta, resources, admin, files
+
+setup_logging()
 
 app = FastAPI(title=settings.APP_NAME)
 

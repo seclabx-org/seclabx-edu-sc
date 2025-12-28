@@ -25,5 +25,10 @@ class Settings(BaseSettings):
     APP_NAME: str = "Ideology Resource Platform"
     ALLOW_ORIGINS: str = "http://localhost:3000"
 
+    # Logging
+    LOG_DIR: str = "/data/logs"
+    LOG_LEVEL: str = "INFO"
+    LOG_RETENTION_DAYS: int = 14
+
 
 settings = Settings()
