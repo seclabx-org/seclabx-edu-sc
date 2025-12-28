@@ -39,8 +39,6 @@ jobs:
           tags: |
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_API }}:latest
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_API }}:${{ github.sha }}
-          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME_API }}:buildcache
-          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME_API }}:buildcache,mode=max
 
       - name: Build and Push Frontend Image
         uses: docker/build-push-action@v5
@@ -50,5 +48,3 @@ jobs:
           tags: |
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_WEB }}:latest
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_WEB }}:${{ github.sha }}
-          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME_WEB }}:buildcache
-          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME_WEB }}:buildcache,mode=max

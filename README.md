@@ -20,17 +20,27 @@ docker compose up --build
 
 默认管理员：`admin` / `Admin#123456`
 
-## 服务器部署（直接拉取镜像）
-无需本地构建，拉取远程仓库镜像：
+## 服务器部署（拉取镜像直接运行）
+无需本地构建，仅需 Docker 与 Docker Compose：
 ```bash
-cp backend/.env.example backend/.env   # 修改 JWT_SECRET、SIGNED_URL_SECRET、DATABASE_URL 等
+# 1) 准备目录与配置
+mkdir -p seclabx-edu-sc && cd seclabx-edu-sc
+# 创建backend.env（可从仓库复制 backend/.env.example）
+# 必填：请改成自己的安全值
+JWT_SECRET=CHANGE_ME_TO_A_RANDOM_LONG_SECRET
+SIGNED_URL_SECRET=CHANGE_ME_TOO
+DATABASE_URL=postgresql+psycopg2://postgres:postgres@db:5432/ideology
+# 可选：其它配置参考 backend/.env.example
+
+# 2) 获取部署 compose（可从仓库复制 docker-compose.deploy.yml）
+
+# 3) 拉取镜像，并启动
 docker compose -f docker-compose.deploy.yml pull
 docker compose -f docker-compose.deploy.yml up -d
 # 前端：http://<server-ip>:3000
 # 后端：http://<server-ip>:8000
 ```
-数据目录 `data/db`、`data/uploads` 会随 compose 自动创建，无需手工。
-如需调整端口或 API 地址，可复制 `docker-compose.deploy.yml`/override 后修改；也可在服务器新建一个最小 `docker-compose.yml`（参考 deploy 示例）后直接 `docker compose up -d`。
+数据目录 `data/db`、`data/uploads` 随启动自动生成，无需手工。若端口或 API 地址需调整，修改上述 compose 中的端口映射或 `NEXT_PUBLIC_API_BASE`。
 
 ## 配置说明
 - 后端环境变量：`backend/.env`（JWT_SECRET、SIGNED_URL_SECRET、DATABASE_URL 等）

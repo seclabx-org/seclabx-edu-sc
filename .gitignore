@@ -5,3 +5,7 @@ docs-private/
 
 # Local npm cache
 /frontend/.npm-cache/
+
+# Local env files (do not commit secrets)
+.env
+/backend/.env
