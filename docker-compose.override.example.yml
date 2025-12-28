@@ -1,0 +1,18 @@
+# 示例覆写：修改端口和前端 API 地址，避免端口冲突或指定域名
+services:
+  db:
+    ports:
+      - "15432:5432"
+
+  api:
+    ports:
+      - "8001:8000"
+
+  web:
+    ports:
+      - "3001:3000"
+    environment:
+      # 部署到远程服务器时，请改成服务器可访问的 IP/域名
+      # 例如 IP 直连：http://<server-ip>:8000/api/v1
+      #       域名：https://your-domain.example.com/api/v1
+      NEXT_PUBLIC_API_BASE: http://<server-ip>:8000/api/v1

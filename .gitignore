@@ -1,0 +1,7 @@
+# Local data volumes (database and uploads)
+/data/
+/backend/data/
+docs-private/
+
+# Local npm cache
+/frontend/.npm-cache/
