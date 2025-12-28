@@ -25,7 +25,7 @@ docker compose up --build
 ```bash
 # 1) 准备目录与配置
 mkdir -p seclabx-edu-sc && cd seclabx-edu-sc
-# 创建backend.env（可从仓库复制 backend/.env.example）
+# 创建backend/.env（可从仓库复制 backend/.env.example）
 # 必填：请改成自己的安全值
 JWT_SECRET=CHANGE_ME_TO_A_RANDOM_LONG_SECRET
 SIGNED_URL_SECRET=CHANGE_ME_TOO
