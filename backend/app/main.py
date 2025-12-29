@@ -37,7 +37,13 @@ async def app_error_handler(request: Request, exc: AppError):
 
 @app.exception_handler(RequestValidationError)
 async def validation_handler(request: Request, exc: RequestValidationError):
-    return err(request, "VALIDATION_ERROR", "Validation failed", 400, {"errors": exc.errors()})
+    return err(request, "VALIDATION_ERROR", "参数校验失败", 400, {"errors": exc.errors()})
+
+
+@app.exception_handler(Exception)
+async def internal_handler(request: Request, exc: Exception):
+    # 兜底异常处理，避免英语提示直接暴露给用户
+    return err(request, "INTERNAL_ERROR", "服务器开小差，请稍后再试", 500, {})
 
 
 @app.get("/healthz")

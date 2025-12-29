@@ -29,10 +29,12 @@ def setup_logging():
                     "formatter": "default",
                     "level": settings.LOG_LEVEL,
                     "filename": str(logfile),
+                    "interval": 1,
                     "when": "midnight",
                     "backupCount": settings.LOG_RETENTION_DAYS,
                     "encoding": "utf-8",
-                    "utc": True,
+                    "utc": False,
+                    "delay": True,
                 },
             },
             "loggers": {

@@ -6,6 +6,13 @@ import Link from "next/link";
 import { resourceApi, uploadFile } from "../../../../lib/api";
 import { useAuthGuard } from "../../../../lib/useAuthGuard";
 
+const statusLabel: Record<string, string> = {
+  draft: "草稿",
+  pending: "待发布",
+  published: "已发布",
+  archived: "已下架",
+};
+
 export default function ResourceDetailPage() {
   const params = useParams();
   const id = Number(params?.id);
@@ -69,7 +76,7 @@ export default function ResourceDetailPage() {
       <div className="rounded border bg-white p-4">
         <p className="text-sm text-red-600">{error}</p>
         <Link href="/login" className="text-brand">
-          去登录
+          前往登录
         </Link>
       </div>
     );
@@ -77,13 +84,19 @@ export default function ResourceDetailPage() {
   if (!data) return <p className="text-sm text-slate-600">加载中...</p>;
 
   const isAdmin = user?.role === "admin";
+  const formatTime = (v?: string | null) => {
+    if (!v) return "未记录";
+    const d = new Date(v);
+    return isNaN(d.getTime()) ? v : d.toLocaleString("zh-CN", { hour12: false, timeZone: "Asia/Shanghai" });
+  };
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold">{data.title}</h1>
-          <p className="text-sm text-slate-600">状态：{data.status}</p>
+          <p className="text-sm text-slate-600">状态：{statusLabel[data.status] || data.status}</p>
+          <p className="text-xs text-slate-500">类型：{data.resource_type || "未填写"} · 来源：{data.source_type === "url" ? "外链" : "上传"}</p>
         </div>
         <div className="flex gap-2">
           {data.can_download && (
@@ -108,17 +121,21 @@ export default function ResourceDetailPage() {
         <div className="rounded-lg border bg-white p-4">
           <h3 className="text-sm font-semibold text-slate-800">基本信息</h3>
           <ul className="mt-2 space-y-1 text-sm text-slate-700">
-            <li>专业群：{data.group_name || "—"}</li>
-            <li>专业：{data.major_name || "—"}</li>
-            <li>课程：{data.course_name || "—"}</li>
-            <li>标签：{(data.tag_names || []).join(" / ") || "—"}</li>
-            <li>创建时间：{data.created_at || "—"}</li>
-            <li>发布时间：{data.published_at || "—"}</li>
+            <li>类型：{data.resource_type || "未填写"}</li>
+            <li>来源：{data.source_type === "url" ? "外链" : "上传"}</li>
+            <li>专业群：{data.group_name || "未填写"}</li>
+            <li>专业：{data.major_name || "未填写"}</li>
+            <li>课程：{data.course_name || "未填写"}</li>
+            <li>标签：{(data.tag_names || []).join(" / ") || "未填写"}</li>
+            <li>创建时间：{formatTime(data.created_at)}</li>
+            <li>发布时间：{data.published_at ? formatTime(data.published_at) : "未发布"}</li>
             <li>下载次数：{data.download_count ?? 0}</li>
+            <li>面向人群：{data.audience || "未填写"}</li>
+            <li>时长：{data.duration_seconds ? `${Math.round(data.duration_seconds / 60)} 分钟` : "未填写"}</li>
           </ul>
         </div>
         <div className="rounded-lg border bg-white p-4">
-          <h3 className="text-sm font-semibold text-slate-800">附件</h3>
+          <h3 className="text-sm font-semibold text-slate-800">文件</h3>
           {data.file ? (
             <div className="text-sm text-slate-700">
               <p>名称：{data.file.name}</p>

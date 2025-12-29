@@ -9,3 +9,4 @@ passlib[bcrypt]>=1.7.4
 # bcrypt 3.1.x 与 passlib 1.7.4 兼容且不会触发 >72 字节长度异常
 bcrypt==3.1.7
 python-multipart>=0.0.9
+oss2>=2.18.6

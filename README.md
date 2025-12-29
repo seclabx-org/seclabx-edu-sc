@@ -1,59 +1,76 @@
-# 课程思政资源平台
+﻿# 课程思政资源平台
 
-面向信息安全技术应用专业群的课程思政资源管理与展示平台，前后端分离（FastAPI + Next.js），开箱即用的 Docker Compose 部署。
+面向信息安全技术应用专业群的课程思政资源管理与展示平台（FastAPI + Next.js），一键 Docker Compose 即可运行。
 
-## 功能亮点
-- 登录与权限：Admin / Teacher
-- 元数据：专业群、专业、课程、思政标签
-- 资源管理：创建、上传文件或外链、发布/下架、签名下载、下载计数
-- 管理端：用户管理、基础资源报表骨架
+## 功能概览
+- 登录鉴权：管理员 / 教师，受保护页鉴权，token 过期自动提示。
+- 资源管理：发布/下架、外链或上传资源、签名下载、下载日志、标签/课程/专业群关联。
+- 教师工作台：草稿编辑、上传校验（类型白名单、大小限制）、发布申请。
+- 管理后台：用户管理（仅管理员可访问）。
+- 示例数据：默认创建专业群、专业、课程、标签，自动注入 6 条示例资源（封面位于 `frontend/public/sample-covers/`，资源路径 `frontend/public/sample-files/`）。
 
-## 快速开始（本地一键启动）
-需要 Docker 与 Docker Compose。默认端口：3000(前端) / 8000(后端) / 5432(DB)。
+## 快速启动（Docker）
 ```bash
+# 准备环境变量
 cp backend/.env.example backend/.env
+# 按需修改 JWT_SECRET / SIGNED_URL_SECRET / DATABASE_URL
+
+# 启动
 docker compose up --build
-# 前端：http://localhost:3000
-# 后端：http://localhost:8000  (Swagger: /docs)
+# 前端 http://localhost:3000
+# 后端 http://localhost:8000 (Swagger: /docs)
 ```
-数据持久化：项目根 `data/`（`data/db` 数据库，`data/uploads` 上传文件），拷贝该目录即可备份/迁移。若端口或 API 地址冲突，复制 `docker-compose.override.example.yml` 为 `docker-compose.override.yml`，调整端口或 `NEXT_PUBLIC_API_BASE` 后再 `docker compose up -d`。
+默认账号：`admin` / `Admin#123456`
+数据持久化：`data/db`（数据库）、`data/uploads`（本地上传文件）、`data/previews`（办公文档转 PDF 缓存）、`data/logs`（按天滚动日志）。
 
-默认管理员：`admin` / `Admin#123456`
-
-## 服务器部署（拉取镜像直接运行）
-无需本地构建，仅需 Docker 与 Docker Compose：
-```bash
-# 1) 准备目录与配置
-mkdir -p seclabx-edu-sc && cd seclabx-edu-sc
-# 创建backend/.env（可从仓库复制 backend/.env.example）
-# 必填：请改成自己的安全值
-JWT_SECRET=CHANGE_ME_TO_A_RANDOM_LONG_SECRET
-SIGNED_URL_SECRET=CHANGE_ME_TOO
+## 核心配置（backend/.env）
+必填：
+```
 DATABASE_URL=postgresql+psycopg2://postgres:postgres@db:5432/ideology
-# 可选：其它配置参考 backend/.env.example
-
-# 2) 获取部署 compose（可从仓库复制 docker-compose.deploy.yml）
-
-# 3) 拉取镜像，并启动
-docker compose -f docker-compose.deploy.yml pull
-docker compose -f docker-compose.deploy.yml up -d
-# 前端：http://<server-ip>:3000
-# 后端：http://<server-ip>:8000
+JWT_SECRET=请替换为随机长字符串
+SIGNED_URL_SECRET=请替换为随机长字符串
+ALLOW_ORIGINS=http://localhost:3000
 ```
-数据目录 `data/db`、`data/uploads` 随启动自动生成，无需手工。若端口或 API 地址需调整，修改上述 compose 中的端口映射或 `NEXT_PUBLIC_API_BASE`。
+上传与签名：
+```
+UPLOAD_DIR=/data/uploads
+MAX_UPLOAD_MB=200
+ALLOWED_FILE_EXT=pdf,pptx,docx,xlsx,mp4,png,jpg,zip
+SIGNED_URL_EXPIRES_SECONDS=60
+```
+预览：
+```
+PREVIEW_DIR=/data/previews        # 办公文档转 PDF 的缓存目录
+# 日志（按天滚动，保留 LOG_RETENTION_DAYS 天）
+LOG_DIR=/data/logs
+LOG_LEVEL=INFO
+LOG_RETENTION_DAYS=14
+SEED_SAMPLE_DATA=true          # 是否在初始化时注入示例资源（默认 true，设置为 false 则仅创建基础元数据）
+```
 
-## 配置说明
-- 后端环境变量：`backend/.env`（JWT_SECRET、SIGNED_URL_SECRET、DATABASE_URL 等）
-- 前端环境变量：`NEXT_PUBLIC_API_BASE`（默认 http://localhost:8000/api/v1，可在 override/deploy 中改为 IP/域名）
-- 上传限制：见 `backend/app/core/config.py`（后缀白名单、大小限制）
+### 可选：阿里云 OSS 存储
+默认使用本地存储（`UPLOAD_DIR`）；如需切换 OSS：
+```
+STORAGE_BACKEND=oss
+OSS_ENDPOINT=https://<your-endpoint>.aliyuncs.com
+OSS_BUCKET=<your-bucket>
+OSS_ACCESS_KEY=<AK>
+OSS_SECRET=<SK>
+# 可选自定义访问域名（含 CDN 域名）
+OSS_BASE_URL=https://your-cdn-domain
+```
+启用后：
+- 上传直接写入 OSS，`file_id` 为 OSS 对象 key。
+- 下载接口返回临时签名 URL（绑定用户且带过期时间）。
+- 本地签名下载接口 `/api/v1/files/signed/...` 自动关闭。
 
-## 目录结构
-- `backend/`：FastAPI 后端（Dockerfile、.env.example、app 源码）
-- `frontend/`：Next.js 前端（Dockerfile、src 源码）
-- `docker-compose.yml`：默认一键启动
-- `docker-compose.override.example.yml`：端口/API 覆写示例
-- `docker-compose.deploy.yml`：拉取预构建镜像的部署示例
-- `data/`：运行时数据（数据库/上传，已忽略提交）
+## 目录结构（摘录）
+- `backend/`：FastAPI 服务、模型与路由、存储/鉴权逻辑。
+- `frontend/`：Next.js 前端，含资源列表/详情、登录、教师工作台等页面。
+- `docs-private/resource-design.md`：资源类型与展示方案文档。
+- `data/`：运行时数据卷（已在 .gitignore 中忽略）。
 
-## 许可证
-本项目基于 Apache License 2.0 开源发布，详情见 LICENSE 文件。![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)
+## 开发与测试
+- 前端 API 基址：`NEXT_PUBLIC_API_BASE`（默认 `http://localhost:8000/api/v1`）。
+- 推荐在 `test/` 下编写自动化脚本，避免污染项目目录。
+- 登录鉴权、上传白名单、签名下载等安全逻辑已启用，生产环境请务必替换密钥并限制 CORS 域名。

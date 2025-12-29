@@ -21,6 +21,17 @@ class Settings(BaseSettings):
     SIGNED_URL_SECRET: str
     SIGNED_URL_EXPIRES_SECONDS: int = 60
 
+    # Preview
+    PREVIEW_DIR: str = "/data/previews"
+
+    # Storage
+    STORAGE_BACKEND: str = "local"  # local or oss
+    OSS_ENDPOINT: str | None = None
+    OSS_BUCKET: str | None = None
+    OSS_ACCESS_KEY: str | None = None
+    OSS_SECRET: str | None = None
+    OSS_BASE_URL: str | None = None  # 可选，自定义访问域名
+
     # App
     APP_NAME: str = "Ideology Resource Platform"
     ALLOW_ORIGINS: str = "http://localhost:3000"
@@ -29,6 +40,9 @@ class Settings(BaseSettings):
     LOG_DIR: str = "/data/logs"
     LOG_LEVEL: str = "INFO"
     LOG_RETENTION_DAYS: int = 14
+
+    # Seed
+    SEED_SAMPLE_DATA: bool = True
 
 
 settings = Settings()

@@ -9,6 +9,7 @@ function getToken() {
 
 export async function apiFetch(path: string, options: RequestInit = {}) {
   const token = getToken();
+  const hasToken = Boolean(token);
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     ...(options.headers as Record<string, string>),
@@ -19,7 +20,25 @@ export async function apiFetch(path: string, options: RequestInit = {}) {
   const resp = await fetch(`${API_BASE}${path}`, { ...options, headers, cache: "no-store" });
   const data = await resp.json().catch(() => null);
   if (!resp.ok) {
-    throw new Error(data?.error?.message || `请求失败(${resp.status})`);
+    const isAuthEndpoint = path.startsWith("/auth/");
+    if ((resp.status === 401 || resp.status === 403) && typeof window !== "undefined" && hasToken && !isAuthEndpoint) {
+      localStorage.removeItem("token");
+      window.dispatchEvent(new Event("auth-changed"));
+      if (!(window as any).__auth_notified) {
+        alert("登录已过期，请重新登录");
+        (window as any).__auth_notified = true;
+        setTimeout(() => {
+          (window as any).__auth_notified = false;
+        }, 3000);
+      }
+    }
+    let msg = data?.error?.message;
+    const detail = data?.error?.details;
+    const firstErr = Array.isArray(detail?.errors) && detail.errors.length > 0 ? detail.errors[0] : null;
+    if (!msg && firstErr?.msg) {
+      msg = firstErr.msg;
+    }
+    throw new Error(msg || `请求失败(${resp.status})`);
   }
   return data?.data;
 }
@@ -44,7 +63,7 @@ export const metaApi = {
 };
 
 export const resourceApi = {
-  list: (params: Record<string, string | number | undefined> = {}) => {
+  list: (params: Record<string, string | number | boolean | undefined> = {}) => {
     const query = new URLSearchParams();
     Object.entries(params).forEach(([k, v]) => {
       if (v !== undefined && v !== null) query.append(k, String(v));
@@ -52,6 +71,13 @@ export const resourceApi = {
     return apiFetch(`/resources${query.toString() ? `?${query.toString()}` : ""}`);
   },
   detail: (id: number) => apiFetch(`/resources/${id}`),
+  summary: (params: Record<string, string | number | undefined> = {}) => {
+    const query = new URLSearchParams();
+    Object.entries(params).forEach(([k, v]) => {
+      if (v !== undefined && v !== null) query.append(k, String(v));
+    });
+    return apiFetch(`/resources/summary${query.toString() ? `?${query.toString()}` : ""}`);
+  },
   create: (payload: any) =>
     apiFetch("/resources", {
       method: "POST",
@@ -63,6 +89,7 @@ export const resourceApi = {
       body: JSON.stringify(payload),
     }),
   download: (id: number) => apiFetch(`/resources/${id}/download`),
+  preview: (id: number) => apiFetch(`/resources/${id}/preview`),
   publish: (id: number) => apiFetch(`/resources/${id}/publish`, { method: "POST" }),
   archive: (id: number) => apiFetch(`/resources/${id}/archive`, { method: "POST" }),
   remove: (id: number) => apiFetch(`/resources/${id}`, { method: "DELETE" }),

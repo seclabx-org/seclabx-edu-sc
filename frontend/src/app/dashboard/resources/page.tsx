@@ -4,32 +4,40 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { resourceApi } from "../../../lib/api";
 import { ResourceCard } from "../../../components/ResourceCard";
+import { useAuthGuard } from "../../../lib/useAuthGuard";
 
 export default function DashboardResources() {
+  const { user, loading } = useAuthGuard({ redirectTo: "/dashboard/resources" });
   const [items, setItems] = useState<any[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   const load = () => {
     resourceApi
-      .list()
+      .list({ mine: 1 })
       .then((data: any) => setItems(data.items || []))
       .catch((e: any) => setError(e.message || "加载失败"));
   };
 
   useEffect(() => {
-    load();
-  }, []);
+    if (user) load();
+  }, [user]);
+
+  if (loading) {
+    return <div className="rounded border bg-white p-4 text-sm text-slate-600">正在校验登录...</div>;
+  }
 
   if (error) {
     return (
       <div className="rounded border bg-white p-4">
         <p className="text-sm text-red-600">{error}</p>
         <Link href="/login" className="text-brand">
-          去登录
+          先登录
         </Link>
       </div>
     );
   }
+
+  if (!user) return null;
 
   return (
     <div className="space-y-4">

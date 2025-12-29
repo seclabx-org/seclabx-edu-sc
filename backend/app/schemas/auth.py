@@ -10,3 +10,8 @@ class TokenOut(BaseModel):
     access_token: str
     token_type: str = "Bearer"
     expires_in: int
+
+
+class ChangePasswordIn(BaseModel):
+    old_password: str
+    new_password: str

@@ -5,6 +5,8 @@ import { useEffect, useState } from "react";
 import { adminApi } from "../../lib/api";
 import { useAuthGuard } from "../../lib/useAuthGuard";
 
+const roleLabel: Record<string, string> = { admin: "管理员", teacher: "教师" };
+
 export default function AdminPage() {
   const { user, loading } = useAuthGuard({ requiredRole: "admin" });
   const [users, setUsers] = useState<any[]>([]);
@@ -66,8 +68,8 @@ export default function AdminPage() {
                 <td className="px-4 py-2">{u.id}</td>
                 <td className="px-4 py-2">{u.username}</td>
                 <td className="px-4 py-2">{u.name}</td>
-                <td className="px-4 py-2">{u.role}</td>
-                <td className="px-4 py-2">{u.major_id ?? "—"}</td>
+                <td className="px-4 py-2">{roleLabel[u.role] || u.role}</td>
+                <td className="px-4 py-2">{u.major_id ?? "无"}</td>
                 <td className="px-4 py-2">{u.is_active ? "启用" : "禁用"}</td>
               </tr>
             ))}
