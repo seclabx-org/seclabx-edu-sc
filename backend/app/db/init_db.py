@@ -22,6 +22,7 @@ def migrate_resource_columns():
         "ALTER TABLE resources ADD COLUMN IF NOT EXISTS duration_seconds INTEGER",
         "ALTER TABLE resources ADD COLUMN IF NOT EXISTS audience VARCHAR(100)",
         "ALTER TABLE resources ADD COLUMN IF NOT EXISTS view_count INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE resources ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP WITH TIME ZONE",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS group_id INTEGER REFERENCES professional_groups(id)",
         "ALTER TABLE professional_groups ADD COLUMN IF NOT EXISTS sort_order INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE courses ADD COLUMN IF NOT EXISTS sort_order INTEGER NOT NULL DEFAULT 0",

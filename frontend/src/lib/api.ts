@@ -100,6 +100,7 @@ export const resourceApi = {
   publish: (id: number) => apiFetch(`/resources/${id}/publish`, { method: "POST" }),
   archive: (id: number) => apiFetch(`/resources/${id}/archive`, { method: "POST" }),
   remove: (id: number) => apiFetch(`/resources/${id}`, { method: "DELETE" }),
+  myFilters: () => apiFetch("/resources/my-filters"),
 };
 
 export async function uploadFile(resourceId: number, file: File) {
@@ -113,6 +114,20 @@ export async function uploadFile(resourceId: number, file: File) {
   });
   const data = await resp.json().catch(() => null);
   if (!resp.ok) throw new Error(data?.error?.message || "上传失败");
+  return data.data;
+}
+
+export async function uploadCover(resourceId: number, file: File) {
+  const token = getToken();
+  const form = new FormData();
+  form.append("file", file);
+  const resp = await fetch(`${API_BASE}/resources/${resourceId}/cover`, {
+    method: "POST",
+    body: form,
+    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+  });
+  const data = await resp.json().catch(() => null);
+  if (!resp.ok) throw new Error(data?.error?.message || "封面上传失败");
   return data.data;
 }
 

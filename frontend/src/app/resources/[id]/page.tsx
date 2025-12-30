@@ -23,7 +23,7 @@ export default function ResourceDetail() {
   const params = useParams();
   const id = Number(params?.id);
   const router = useRouter();
-  const { user, loading: authLoading, error: authError } = useAuthGuard(); // 未登录直接跳登录
+  const { user, loading: authLoading, error: authError } = useAuthGuard(); // 未登录自动跳转
   const [data, setData] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
@@ -93,7 +93,7 @@ export default function ResourceDetail() {
     router.push(`/resources${params.toString() ? `?${params.toString()}` : ""}`);
   };
 
-  if (authLoading) return <p className="text-sm text-slate-600">正在校验登录...</p>;
+  if (authLoading) return <p className="text-sm text-slate-600">正在校验登录状态...</p>;
   if (!user || authError) {
     return (
       <div className="rounded border bg-white p-4">
@@ -116,14 +116,14 @@ export default function ResourceDetail() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-start justify-between gap-3">
+      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
         <div className="space-y-2">
           <h1 className="text-2xl font-semibold text-slate-900">{data.title}</h1>
           <div className="flex flex-wrap gap-2 text-xs text-slate-600">
             <span className="rounded bg-blue-50 px-2 py-1 text-blue-700">{typeLabel[data.resource_type] || data.resource_type || "未填写"}</span>
             <span className="rounded bg-indigo-50 px-2 py-1 text-indigo-700">{sourceLabel[data.source_type] || data.source_type}</span>
             {data.published_at && <span>发布于 {formatTime(data.published_at)}</span>}
-            {metaLine && <span className="rounded bg-slate-100 px-2 py-1 text-slate-700">专业群/专业：{metaLine}</span>}
+            {metaLine && <span className="rounded bg-slate-100 px-2 py-1 text-slate-700">专业群·专业：{metaLine}</span>}
             {data.course_name && (
               <span className="rounded bg-slate-50 px-2 py-1 text-slate-600" title={`课程：${data.course_name}`}>
                 课程：{data.course_name}
@@ -150,8 +150,16 @@ export default function ResourceDetail() {
       </div>
 
       {data.cover_url && (
-        <div className="overflow-hidden rounded-lg border bg-slate-50">
-          <img src={data.cover_url} alt={data.title} className="h-64 w-full object-cover" />
+        <div className="relative w-full overflow-hidden rounded-lg border bg-slate-50 shadow-sm h-56 md:h-64">
+          <div
+            className="absolute inset-0 bg-center bg-cover blur-xl scale-110 opacity-60"
+            style={{ backgroundImage: `url(${data.cover_url})` }}
+          />
+          <img
+            src={data.cover_url}
+            alt={data.title}
+            className="relative z-10 h-full w-full object-contain"
+          />
         </div>
       )}
 
@@ -165,42 +173,42 @@ export default function ResourceDetail() {
         </div>
       )}
       {preview?.mode === "inline" && preview.url && (
-        <div className="rounded border bg-white p-4 space-y-3">
+        <div className="space-y-3 rounded border bg-white p-4">
           {preview.ext === "pdf" && <iframe src={preview.url} className="h-[480px] w-full border" title="预览" />}
           {["png", "jpg", "jpeg", "gif", "webp"].includes(preview.ext) && (
             <img src={preview.url} alt={data.title} className="max-h-[480px] w-full object-contain" />
           )}
           {preview.ext === "mp4" && (
             <video controls className="w-full max-h-[480px]" src={preview.url}>
-              你的浏览器不支持视频播放
+              浏览器不支持视频播放
             </video>
           )}
           {preview.ext === "mp3" && (
             <audio controls className="w-full" src={preview.url}>
-              你的浏览器不支持音频播放
+              浏览器不支持音频播放
             </audio>
           )}
         </div>
       )}
       {preview?.mode === "pdf_preview" && (
-        <div className="rounded border bg-white p-4 space-y-2">
+        <div className="space-y-2 rounded border bg-white p-4">
           <p className="text-sm text-slate-700">已转换为 PDF 预览</p>
           <iframe src={previewBlobUrl || ""} className="h-[480px] w-full border" title="预览" />
         </div>
       )}
       {preview?.mode === "unsupported" && (
         <div className="rounded border bg-white p-4 text-sm text-slate-700">
-          {preview.note || "暂不支持在线预览，请下载查看。"}
+          {preview.note || "暂不支持在线预览，请下载查看"}
         </div>
       )}
 
       <p className="text-sm text-slate-700 whitespace-pre-line">{data.abstract}</p>
 
-      <div className="rounded-lg border bg-white p-4 text-sm text-slate-700 space-y-1">
+      <div className="space-y-1 rounded-lg border bg-white p-4 text-sm text-slate-700">
         <div>类型：{typeLabel[data.resource_type] || data.resource_type || "未填写"}</div>
         <div>来源：{data.source_type === "url" ? "外链" : "上传"}</div>
         <div>标签：{(data.tag_names || []).join(" / ") || "未填写"}</div>
-        {metaLine && <div>专业群/专业：{metaLine}</div>}
+        {metaLine && <div>专业群·专业：{metaLine}</div>}
         {data.course_name && <div>课程：{data.course_name}</div>}
         <div>创建时间：{formatTime(data.created_at)}</div>
         <div>发布时间：{data.published_at ? formatTime(data.published_at) : "未发布"}</div>
@@ -212,7 +220,7 @@ export default function ResourceDetail() {
       </div>
 
       {data.file && (
-        <div className="rounded-lg border bg-white p-4 text-sm text-slate-700 space-y-1">
+        <div className="space-y-1 rounded-lg border bg-white p-4 text-sm text-slate-700">
           <div>文件：{data.file.name}</div>
           <div>大小：{Math.round((data.file.size_bytes || 0) / 1024)} KB</div>
           <div>类型：{data.file.mime}</div>
@@ -220,7 +228,7 @@ export default function ResourceDetail() {
             <button
               onClick={handleDownload}
               disabled={downloading}
-              className="rounded border px-3 py-1 text-brand border-brand hover:bg-brand hover:text-white disabled:opacity-60"
+              className="rounded border border-brand px-3 py-1 text-brand hover:bg-brand hover:text-white disabled:opacity-60"
             >
               预览/下载
             </button>

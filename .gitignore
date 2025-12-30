@@ -15,3 +15,5 @@ config-local/
 
 
 test/
+
+ai-memory/

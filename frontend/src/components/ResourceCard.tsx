@@ -1,4 +1,4 @@
-import Link from "next/link";
+﻿import Link from "next/link";
 
 export type ResourceItem = {
   id: number;
@@ -16,18 +16,18 @@ export type ResourceItem = {
   published_at?: string | null;
   cover_url?: string | null;
   can_edit?: boolean;
+  can_publish?: boolean;
+  can_archive?: boolean;
   owner?: { id?: number; name?: string | null; username?: string | null };
 };
 
 export function ResourceCard({ item, href }: { item: ResourceItem; href?: string }) {
   const statusLabel: Record<string, string> = {
     draft: "草稿",
-    pending: "待发布",
     published: "已发布",
   };
   const statusClass: Record<string, string> = {
     draft: "bg-[#e2e8f0] text-[#475569]",
-    pending: "bg-[#fef3c7] text-[#b45309]",
     published: "bg-[#ecfdf3] text-[#15803d]",
   };
   const typeLabel: Record<string, string> = {

@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
@@ -18,13 +18,16 @@ export default function DashboardHome() {
       .catch(() => setTags([]));
   }, []);
 
-  const colorPairs = [
-    { bg: "#e0f2fe", text: "#0f5fa4" }, // 淡蓝
-    { bg: "#ede9fe", text: "#5b21b6" }, // 淡紫
-    { bg: "#dcfce7", text: "#166534" }, // 淡绿
-    { bg: "#fff7ed", text: "#9a3412" }, // 淡橙
-    { bg: "#fef2f2", text: "#b91c1c" }, // 淡红
-  ];
+  const colorPairs = useMemo(
+    () => [
+      { bg: "#e0f2fe", text: "#0f5fa4" },
+      { bg: "#ede9fe", text: "#5b21b6" },
+      { bg: "#dcfce7", text: "#166534" },
+      { bg: "#fff7ed", text: "#9a3412" },
+      { bg: "#fef2f2", text: "#b91c1c" },
+    ],
+    []
+  );
 
   if (loading) {
     return (
@@ -36,21 +39,31 @@ export default function DashboardHome() {
 
   if (!user) return null;
 
+  const isAdmin = user.role === "admin";
+  const manageLabel = isAdmin ? "管理资源" : "我的资源";
+  const roleLabel = isAdmin ? "管理员" : "教师";
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold">教师工作台</h1>
           <p className="text-sm text-slate-600">
-            欢迎，{user.name}（{user.role}）
+            欢迎，{user.name}（{roleLabel}）
           </p>
         </div>
         <div className="flex gap-3">
-          <Link href="/dashboard/resources/new" className="rounded-md bg-brand px-4 py-2 text-sm text-white hover:opacity-90">
+          <Link
+            href="/dashboard/resources/new"
+            className="rounded-md bg-brand px-4 py-2 text-sm text-white hover:opacity-90"
+          >
             新建资源
           </Link>
-          <Link href="/dashboard/resources" className="rounded-md border px-4 py-2 text-sm text-brand border-brand hover:bg-brand hover:text-white">
-            管理资源
+          <Link
+            href="/dashboard/resources"
+            className="rounded-md border border-brand px-4 py-2 text-sm text-brand hover:bg-brand hover:text-white"
+          >
+            {manageLabel}
           </Link>
         </div>
       </div>
@@ -68,7 +81,7 @@ export default function DashboardHome() {
               我的资源
             </Link>
           </li>
-          {user.role === "admin" && (
+          {isAdmin && (
             <li>
               <Link href="/admin" className="text-brand hover:underline">
                 管理后台（管理员）

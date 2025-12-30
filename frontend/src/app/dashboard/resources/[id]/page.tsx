@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
@@ -8,9 +8,7 @@ import { useAuthGuard } from "../../../../lib/useAuthGuard";
 
 const statusLabel: Record<string, string> = {
   draft: "草稿",
-  pending: "待发布",
   published: "已发布",
-  archived: "已下架",
 };
 
 export default function ResourceDetailPage() {
@@ -21,6 +19,7 @@ export default function ResourceDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [info, setInfo] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const load = () => {
     resourceApi
@@ -59,6 +58,20 @@ export default function ResourceDetailPage() {
     load();
   };
 
+  const handleDelete = async () => {
+    if (!window.confirm("确定删除该资源？此操作不可恢复。")) return;
+    setDeleting(true);
+    try {
+      await resourceApi.remove(id);
+      window.alert("删除成功");
+      window.location.href = "/dashboard/resources";
+    } catch (e: any) {
+      window.alert(e.message || "删除失败");
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   const handleDownload = async () => {
     try {
       const res = await resourceApi.download(id);
@@ -84,6 +97,12 @@ export default function ResourceDetailPage() {
   if (!data) return <p className="text-sm text-slate-600">加载中...</p>;
 
   const isAdmin = user?.role === "admin";
+  const isOwner = Boolean(data?.can_edit);
+  const canPublish = Boolean(data?.can_publish ?? ((isAdmin || isOwner) && data.status !== "published"));
+  const canArchive = Boolean(data?.can_archive ?? ((isAdmin || isOwner) && data.status === "published"));
+  const canDelete =
+    (isAdmin && data.status !== "published") || // 管理员可删草稿/未发布，如需删已发布请放开此限制
+    (isOwner && data.status === "draft");
   const formatTime = (v?: string | null) => {
     if (!v) return "未记录";
     const d = new Date(v);
@@ -96,7 +115,9 @@ export default function ResourceDetailPage() {
         <div>
           <h1 className="text-2xl font-semibold">{data.title}</h1>
           <p className="text-sm text-slate-600">状态：{statusLabel[data.status] || data.status}</p>
-          <p className="text-xs text-slate-500">类型：{data.resource_type || "未填写"} · 来源：{data.source_type === "url" ? "外链" : "上传"}</p>
+          <p className="text-xs text-slate-500">
+            类型：{data.resource_type || "未填写"} · 来源：{data.source_type === "url" ? "外链" : "上传"}
+          </p>
         </div>
         <div className="flex gap-2">
           {data.can_download && (
@@ -104,14 +125,23 @@ export default function ResourceDetailPage() {
               下载
             </button>
           )}
-          {isAdmin && data.status !== "published" && (
+          {canPublish && (
             <button onClick={handlePublish} className="rounded-md bg-brand px-3 py-2 text-sm text-white">
               发布
             </button>
           )}
-          {isAdmin && data.status !== "archived" && (
+          {canArchive && (
             <button onClick={handleArchive} className="rounded-md bg-slate-800 px-3 py-2 text-sm text-white">
               下架
+            </button>
+          )}
+          {canDelete && (
+            <button
+              onClick={handleDelete}
+              disabled={deleting}
+              className="rounded-md bg-red-600 px-3 py-2 text-sm text-white disabled:opacity-70"
+            >
+              {deleting ? "删除中..." : "删除"}
             </button>
           )}
         </div>
@@ -145,7 +175,7 @@ export default function ResourceDetailPage() {
           ) : (
             <p className="text-sm text-slate-600">尚未上传文件。</p>
           )}
-          {data.can_edit && (
+          {isOwner && (
             <div className="mt-3">
               <label className="text-sm text-slate-700">上传文件</label>
               <input

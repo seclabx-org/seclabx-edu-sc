@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
@@ -24,7 +24,7 @@ export default function Home() {
     <div className="space-y-10">
       <section className="rounded-2xl bg-gradient-to-r from-brand to-brand-dark p-10 text-white shadow-lg">
         <h1 className="text-3xl font-bold">信息安全技术应用专业群 · 课程思政资源平台</h1>
-        <p className="mt-4 max-w-3xl text-lg text-blue-100">
+        <p className="mt-4 max-w-3xl text-lg text-blue-100 md:whitespace-nowrap whitespace-normal">
           面向专业群课程建设，提供统一的课程思政资源发布与共享平台，服务教学应用与育人成效提升。
         </p>
         <div className="mt-6 flex gap-4">

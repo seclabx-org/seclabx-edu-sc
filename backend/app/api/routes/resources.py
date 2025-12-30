@@ -22,6 +22,7 @@ from app.models.resource import Resource, resource_tags
 from app.models.download import DownloadLog
 from app.models.user import User
 from app.schemas.resource import ResourceCreateIn, ResourcePatchIn
+from app.models.audit import ResourceAudit
 
 router = APIRouter(prefix="/api/v1/resources", tags=["resources"])
 
@@ -36,7 +37,45 @@ RESOURCE_TYPES = {
     "practice": "案例",
     "link": "链接",
 }
-ALLOWED_STATUS = {"draft", "published", "pending"}
+ALLOWED_STATUS = {"draft", "published"}
+DEFAULT_COVERS = {
+    "text": "/sample-covers/text.jpg",
+    "slide": "/sample-covers/slide.jpg",
+    "video": "/sample-covers/video.jpg",
+    "audio": "/sample-covers/audio.jpg",
+    "image": "/sample-covers/image.jpg",
+    "doc": "/sample-covers/doc.jpg",
+    "policy": "/sample-covers/policy.jpg",
+    "practice": "/sample-covers/practice.jpg",
+    "link": "/sample-covers/link.jpg",
+}
+DEFAULT_COVER_FALLBACK = "/sample-covers/default-cover.jpg"
+
+
+def _default_cover(rt: str | None) -> str:
+    return DEFAULT_COVERS.get(rt or "", DEFAULT_COVER_FALLBACK)
+
+
+def _cover_public_url(r: Resource, request: Request | None = None) -> str:
+    """
+    返回可供前端展示的封面地址：
+    - 空值：按类型默认封面
+    - 本地上传：cover_url 形如 local:filename，返回 /api/v1/resources/{rid}/cover-file?file=filename
+    - OSS 上传：cover_url 形如 oss:key，生成签名 URL
+    - 其他：直接返回 cover_url（可为前端静态路径或 http(s)）
+    """
+    if not r.cover_url:
+        return _default_cover(r.resource_type)
+    if r.cover_url.startswith("oss:"):
+        key = r.cover_url.replace("oss:", "", 1)
+        return generate_oss_signed_url(key, settings.SIGNED_URL_EXPIRES_SECONDS)
+    if r.cover_url.startswith("local:"):
+        filename = r.cover_url.replace("local:", "", 1)
+        if request:
+            base = str(request.base_url).rstrip("/")
+            return f"{base}/api/v1/resources/{r.id}/cover-file?file={filename}"
+        return f"/api/v1/resources/{r.id}/cover-file?file={filename}"
+    return r.cover_url
 
 def _safe_filename(name: str) -> str:
     cleaned = name.replace("\\", "_").replace("/", "_").replace("..", "_")
@@ -151,6 +190,13 @@ def _ensure_preview_pdf(r: Resource) -> str:
         raise AppError(code="PREVIEW_CONVERT_FAILED", message="预览生成失败", status_code=500)
     return preview_path
 
+
+def _cover_local_path(filename: str) -> Path:
+    """本地封面文件存储路径（UPLOAD_DIR/covers/filename）。"""
+    base = Path(settings.UPLOAD_DIR) / "covers"
+    base.mkdir(parents=True, exist_ok=True)
+    return base / filename
+
 def _enrich_names(db: Session, r: Resource):
     group = db.query(ProfessionalGroup).filter(ProfessionalGroup.id == r.group_id).first() if r.group_id else None
     major = db.query(Major).filter(Major.id == r.major_id).first() if r.major_id else None
@@ -190,7 +236,7 @@ def list_resources(
     page = max(1, page)
     page_size = min(max(1, page_size), 100)
 
-    q = db.query(Resource)
+    q = db.query(Resource).filter(Resource.deleted_at.is_(None))
     if mine:
         if not user:
             raise permission_denied()
@@ -201,8 +247,10 @@ def list_resources(
         else:
             if user.role != "admin":
                 q = q.filter(or_(Resource.status == "published", Resource.owner_user_id == user.id))
-            elif status:
-                q = q.filter(Resource.status == status)
+    if status:
+        if status not in ALLOWED_STATUS:
+            raise validation_error("状态不合法")
+        q = q.filter(Resource.status == status)
 
     if group_id:
         q = q.filter(Resource.group_id == group_id)
@@ -232,6 +280,11 @@ def list_resources(
     for r in rows:
         names = _enrich_names(db, r)
         owner = db.query(User).filter(User.id == r.owner_user_id).first()
+        can_manage = bool(user and (user.role == "admin" or r.owner_user_id == user.id))
+        can_publish = can_manage and r.status != "published"
+        can_archive = can_manage and r.status == "published"
+        status_out = r.status if r.status in ALLOWED_STATUS else "draft"
+        cover_out = _cover_public_url(r, request)
         base = {
             "id": r.id,
             "title": r.title,
@@ -247,12 +300,12 @@ def list_resources(
             "tag_names": names["tag_names"],
             "source_type": r.source_type,
             "file_type": r.file_type,
-            "status": r.status,
+            "status": status_out,
             "download_count": r.download_count,
             "view_count": r.view_count,
             "created_at": r.created_at.isoformat() if r.created_at else None,
             "published_at": r.published_at.isoformat() if r.published_at else None,
-            "cover_url": r.cover_url,
+            "cover_url": cover_out,
             "duration_seconds": r.duration_seconds,
             "audience": r.audience,
             "owner": None,
@@ -262,6 +315,9 @@ def list_resources(
                 {
                     "can_download": _calc_can_download(user, r),
                     "can_edit": _calc_can_edit(user, r),
+                    "can_publish": can_publish,
+                    "can_archive": can_archive,
+                    "can_manage": can_manage,
                     "owner": {"id": r.owner_user_id, "name": owner.name if owner else None, "username": owner.username if owner else None},
                 }
             )
@@ -297,12 +353,14 @@ def summary(
     """
     limit = max(1, min(limit, 500))
 
-    res_q = db.query(Resource)
-    if not user:
-        res_q = res_q.filter(Resource.status == "published")
-    else:
-        if user.role != "admin":
-            res_q = res_q.filter(or_(Resource.status == "published", Resource.owner_user_id == user.id))
+    # 仅统计已发布且未删除的资源
+    res_q = db.query(
+        Resource.id,
+        Resource.group_id,
+        Resource.major_id,
+        Resource.course_id,
+        Resource.resource_type,
+    ).filter(Resource.status == "published", Resource.deleted_at.is_(None))
 
     if group_id:
         res_q = res_q.filter(Resource.group_id == group_id)
@@ -311,15 +369,17 @@ def summary(
     if course_id:
         res_q = res_q.filter(Resource.course_id == course_id)
 
+    res_sub = res_q.subquery()
+
     if level == "group":
         rows = (
             db.query(
                 ProfessionalGroup.id.label("gid"),
                 ProfessionalGroup.name.label("gname"),
-                func.count(Resource.id).label("cnt"),
+                func.count(res_sub.c.id).label("cnt"),
             )
             .select_from(ProfessionalGroup)
-            .outerjoin(Resource, ProfessionalGroup.id == Resource.group_id)
+            .outerjoin(res_sub, ProfessionalGroup.id == res_sub.c.group_id)
             .group_by(ProfessionalGroup.id, ProfessionalGroup.name)
             .order_by(ProfessionalGroup.id.asc())
             .limit(limit)
@@ -339,11 +399,11 @@ def summary(
             db.query(
                 Major.id.label("mid"),
                 Major.name.label("mname"),
-                func.count(Resource.id).label("cnt"),
+                func.count(res_sub.c.id).label("cnt"),
             )
             .select_from(Major)
             .filter(Major.group_id == group_id)
-            .outerjoin(Resource, Resource.major_id == Major.id)
+            .outerjoin(res_sub, res_sub.c.major_id == Major.id)
             .group_by(Major.id, Major.name, Major.sort_order)
             .order_by(Major.sort_order.asc(), Major.id.asc())
             .limit(limit)
@@ -363,11 +423,11 @@ def summary(
             db.query(
                 Course.id.label("cid"),
                 Course.name.label("cname"),
-                func.count(Resource.id).label("cnt"),
+                func.count(res_sub.c.id).label("cnt"),
             )
             .select_from(Course)
             .filter(Course.major_id == major_id)
-            .outerjoin(Resource, Resource.course_id == Course.id)
+            .outerjoin(res_sub, res_sub.c.course_id == Course.id)
             .group_by(Course.id, Course.name)
             .order_by(Course.id.asc())
             .limit(limit)
@@ -422,7 +482,7 @@ def tags_cloud(
     未登录：仅统计已发布；教师：发布+自己的；管理员：全部。
     """
     limit = max(1, min(limit, 200))
-    res_q = db.query(Resource)
+    res_q = db.query(Resource).filter(Resource.deleted_at.is_(None))
     if not user:
         res_q = res_q.filter(Resource.status == "published")
     else:
@@ -449,6 +509,56 @@ def tags_cloud(
     return ok(request, {"items": items})
 
 
+@router.get("/my-filters")
+def my_filters(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """
+    返回当前用户已创建资源所涉及的课程、标签，供筛选下拉使用。
+    """
+    course_ids = (
+        db.query(Resource.course_id)
+        .filter(Resource.owner_user_id == user.id, Resource.course_id.isnot(None))
+        .distinct()
+        .all()
+    )
+    course_id_list = [cid for (cid,) in course_ids if cid]
+    courses = []
+    if course_id_list:
+        courses = (
+            db.query(Course.id, Course.name)
+            .filter(Course.id.in_(course_id_list))
+            .order_by(Course.id.asc())
+            .all()
+        )
+
+    tag_ids = (
+        db.query(resource_tags.c.tag_id)
+        .join(Resource, resource_tags.c.resource_id == Resource.id)
+        .filter(Resource.owner_user_id == user.id)
+        .distinct()
+        .all()
+    )
+    tag_id_list = [tid for (tid,) in tag_ids if tid]
+    tags = []
+    if tag_id_list:
+        tags = (
+            db.query(IdeologyTag.id, IdeologyTag.name)
+            .filter(IdeologyTag.id.in_(tag_id_list))
+            .order_by(IdeologyTag.id.asc())
+            .all()
+        )
+
+    return ok(
+        request,
+        {
+            "courses": [{"id": cid, "name": name} for cid, name in courses],
+            "tags": [{"id": tid, "name": name} for tid, name in tags],
+        },
+    )
+
 @router.get("/{rid}")
 def get_resource(
     rid: int,
@@ -456,7 +566,7 @@ def get_resource(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    r = db.query(Resource).filter(Resource.id == rid).first()
+    r = db.query(Resource).filter(Resource.id == rid, Resource.deleted_at.is_(None)).first()
     if not r:
         raise not_found()
 
@@ -465,6 +575,11 @@ def get_resource(
 
     names = _enrich_names(db, r)
     owner = db.query(User).filter(User.id == r.owner_user_id).first()
+    can_manage = bool(user and (user.role == "admin" or r.owner_user_id == user.id))
+    can_publish = can_manage and r.status != "published"
+    can_archive = can_manage and r.status == "published"
+    status_out = r.status if r.status in ALLOWED_STATUS else "draft"
+    cover_out = _cover_public_url(r, request)
     r.view_count = (r.view_count or 0) + 1
     db.commit()
     data = {
@@ -482,13 +597,13 @@ def get_resource(
         "tag_names": names["tag_names"],
         "source_type": r.source_type,
         "file_type": r.file_type,
-        "status": r.status,
+        "status": status_out,
         "download_count": r.download_count,
         "view_count": r.view_count,
         "owner": {"id": r.owner_user_id, "name": owner.name if owner else None, "username": owner.username if owner else None},
         "created_at": r.created_at.isoformat() if r.created_at else None,
         "published_at": r.published_at.isoformat() if r.published_at else None,
-        "cover_url": r.cover_url,
+        "cover_url": cover_out,
         "duration_seconds": r.duration_seconds,
         "audience": r.audience,
     }
@@ -498,6 +613,9 @@ def get_resource(
             {
                 "can_download": _calc_can_download(user, r),
                 "can_edit": _calc_can_edit(user, r),
+                "can_publish": can_publish,
+                "can_archive": can_archive,
+                "can_manage": can_manage,
                 "updated_at": r.updated_at.isoformat() if r.updated_at else None,
             }
         )
@@ -521,7 +639,7 @@ def preview_resource(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    r = db.query(Resource).filter(Resource.id == rid).first()
+    r = db.query(Resource).filter(Resource.id == rid, Resource.deleted_at.is_(None)).first()
     if not r:
         raise not_found()
     if user.role != "admin" and not (r.status == "published" or r.owner_user_id == user.id):
@@ -581,6 +699,65 @@ def preview_resource(
     return ok(request, {"mode": "unsupported", "note": "暂不支持在线预览，请下载查看", "mime": mime, "ext": ext})
 
 
+@router.post("/{rid}/cover")
+def upload_cover(
+    rid: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+    file: UploadFile = File(...),
+):
+    r = db.query(Resource).filter(Resource.id == rid, Resource.deleted_at.is_(None)).first()
+    if not r:
+        raise not_found()
+    if user.role != "admin" and not (r.owner_user_id == user.id and r.status == "draft"):
+        raise permission_denied()
+
+    filename = _safe_filename(file.filename or "cover")
+    ext = filename.split(".")[-1].lower() if "." in filename else ""
+    if ext not in {"png", "jpg", "jpeg"}:
+        raise AppError(code="COVER_TYPE_NOT_ALLOWED", message="封面仅支持 png/jpg", status_code=415)
+
+    max_bytes = min(settings.MAX_UPLOAD_MB * 1024 * 1024, 10 * 1024 * 1024)  # 封面限制 10MB
+    if is_oss_enabled():
+        key = f"cover_{rid}_{uuid.uuid4().hex}.{ext}"
+        try:
+            _, _ = save_file_oss(file.file, key)
+        except ValueError:
+            raise AppError(code="FILE_TOO_LARGE", message="封面过大", status_code=413)
+        r.cover_url = f"oss:{key}"
+    else:
+        storage_name = f"cover_{rid}_{uuid.uuid4().hex}.{ext}"
+        storage_path = _cover_local_path(storage_name)
+        try:
+            _, _ = save_file_local(file.file, str(storage_path), max_bytes)
+        except ValueError:
+            raise AppError(code="FILE_TOO_LARGE", message="封面过大", status_code=413)
+        r.cover_url = f"local:{storage_name}"
+    db.commit()
+    return ok(request, {"cover_url": _cover_public_url(r, request)})
+
+
+@router.get("/{rid}/cover-file")
+def get_cover_file(
+    rid: int,
+    file: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User | None = Depends(get_optional_user),
+):
+    r = db.query(Resource).filter(Resource.id == rid, Resource.deleted_at.is_(None)).first()
+    if not r:
+        raise not_found()
+    # 封面为低敏感内容，允许公开访问；如需收紧可改为仅已发布或校验签名
+
+    path = _cover_local_path(file)
+    if not path.exists():
+        raise not_found()
+    mime = "image/png" if path.suffix.lower() == ".png" else "image/jpeg"
+    return FileResponse(str(path), media_type=mime, filename=path.name)
+
+
 @router.post("")
 def create_resource(
     payload: ResourceCreateIn,
@@ -604,18 +781,47 @@ def create_resource(
     status_val = payload.status or "draft"
     if status_val not in ALLOWED_STATUS:
         status_val = "draft"
+    cover_val = payload.cover_url or _default_cover(payload.resource_type)
+
+    course_id = payload.course_id
+    if not course_id and payload.course_name:
+        course_name = payload.course_name.strip()
+        if course_name:
+            course = (
+                db.query(Course)
+                .filter(Course.major_id == payload.major_id, Course.name == course_name)
+                .first()
+            )
+            if not course:
+                course = Course(name=course_name, major_id=payload.major_id, is_active=True)
+                db.add(course)
+                db.flush()
+            course_id = course.id
+
+    tag_ids: list[int] = list(payload.tag_ids or [])
+    for name in payload.tag_names or []:
+        tag_name = name.strip()
+        if not tag_name:
+            continue
+        tag = db.query(IdeologyTag).filter(IdeologyTag.name == tag_name).first()
+        if not tag:
+            tag = IdeologyTag(name=tag_name, is_active=True)
+            db.add(tag)
+            db.flush()
+        tag_ids.append(tag.id)
+    tag_ids = list(dict.fromkeys(tag_ids))
 
     r = Resource(
         title=payload.title,
         abstract=payload.abstract or "",
         group_id=payload.group_id,
         major_id=payload.major_id,
-        course_id=payload.course_id,
+        course_id=course_id,
         resource_type=payload.resource_type,
         source_type=payload.source_type,
         file_type=payload.file_type,
         external_url=payload.external_url,
-        cover_url=payload.cover_url,
+        cover_url=cover_val,
         duration_seconds=payload.duration_seconds,
         audience=payload.audience,
         status=status_val,
@@ -624,7 +830,7 @@ def create_resource(
     db.add(r)
     db.flush()
 
-    for tid in payload.tag_ids or []:
+    for tid in tag_ids:
         db.execute(resource_tags.insert().values(resource_id=r.id, tag_id=tid))
 
     if status_val == "published":
@@ -642,7 +848,7 @@ def patch_resource(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    r = db.query(Resource).filter(Resource.id == rid).first()
+    r = db.query(Resource).filter(Resource.id == rid, Resource.deleted_at.is_(None)).first()
     if not r:
         raise not_found()
 
@@ -675,7 +881,7 @@ def upload_file(
     user: User = Depends(get_current_user),
     file: UploadFile = File(...),
 ):
-    r = db.query(Resource).filter(Resource.id == rid).first()
+    r = db.query(Resource).filter(Resource.id == rid, Resource.deleted_at.is_(None)).first()
     if not r:
         raise not_found()
 
@@ -753,7 +959,7 @@ def submit_resource(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    r = db.query(Resource).filter(Resource.id == rid).first()
+    r = db.query(Resource).filter(Resource.id == rid, Resource.deleted_at.is_(None)).first()
     if not r:
         raise not_found()
     if user.role != "admin" and r.owner_user_id != user.id:
@@ -769,13 +975,23 @@ def publish_resource(
     rid: int,
     request: Request,
     db: Session = Depends(get_db),
-    user: User = Depends(__import__("app.core.rbac", fromlist=["require_roles"]).require_roles("admin")),
+    user: User = Depends(get_current_user),
 ):
-    r = db.query(Resource).filter(Resource.id == rid).first()
+    r = db.query(Resource).filter(Resource.id == rid, Resource.deleted_at.is_(None)).first()
     if not r:
         raise not_found()
+    if user.role != "admin" and not (user.role == "teacher" and r.owner_user_id == user.id):
+        raise permission_denied()
     r.status = "published"
     r.published_at = datetime.now(timezone.utc)
+    db.add(
+        ResourceAudit(
+            resource_id=r.id,
+            action="publish",
+            user_id=user.id,
+            ip=request.client.host if request.client else None,
+        )
+    )
     db.commit()
     return ok(request, {"id": r.id, "status": r.status, "published_at": r.published_at.isoformat()})
 
@@ -787,13 +1003,21 @@ def archive_resource(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    r = db.query(Resource).filter(Resource.id == rid).first()
+    r = db.query(Resource).filter(Resource.id == rid, Resource.deleted_at.is_(None)).first()
     if not r:
         raise not_found()
     if user.role != "admin" and r.owner_user_id != user.id:
         raise permission_denied()
-    r.status = "pending"  # 下架后等待再次发布
+    r.status = "draft"  # 下架后回到草稿
     r.published_at = None
+    db.add(
+        ResourceAudit(
+            resource_id=r.id,
+            action="archive",
+            user_id=user.id,
+            ip=request.client.host if request.client else None,
+        )
+    )
     db.commit()
     return ok(request, {"id": r.id, "status": r.status})
 
@@ -805,7 +1029,7 @@ def delete_resource(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    r = db.query(Resource).filter(Resource.id == rid).first()
+    r = db.query(Resource).filter(Resource.id == rid, Resource.deleted_at.is_(None)).first()
     if not r:
         raise not_found()
 
@@ -816,7 +1040,15 @@ def delete_resource(
             raise permission_denied()
 
     db.execute(resource_tags.delete().where(resource_tags.c.resource_id == r.id))
-    db.delete(r)
+    r.deleted_at = datetime.now(timezone.utc)
+    db.add(
+        ResourceAudit(
+            resource_id=r.id,
+            action="delete",
+            user_id=user.id,
+            ip=request.client.host if request.client else None,
+        )
+    )
     db.commit()
     return no_content()
 
@@ -828,7 +1060,7 @@ def download_resource(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    r = db.query(Resource).filter(Resource.id == rid).first()
+    r = db.query(Resource).filter(Resource.id == rid, Resource.deleted_at.is_(None)).first()
     if not r:
         raise not_found()
     if not _calc_can_download(user, r):
