@@ -19,6 +19,17 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
 
+def _audit(action: str, admin: User, target: User, request: Request, extra: dict | None = None):
+    ip = request.client.host if request.client else "unknown"
+    logger.info(
+        "AUDIT admin=%s action=%s target=%s ip=%s extra=%s",
+        admin.username,
+        action,
+        target.username,
+        ip,
+        extra or {},
+    )
+
 
 @router.get("/users")
 def list_users(
@@ -28,6 +39,10 @@ def list_users(
     page: int = 1,
     page_size: int = 20,
     keyword: str | None = None,
+    role: str | None = None,
+    is_active: bool | None = None,
+    major_id: int | None = None,
+    group_id: int | None = None,
 ):
     page = max(1, page)
     page_size = min(max(1, page_size), 100)
@@ -36,8 +51,21 @@ def list_users(
     if keyword:
         like = f"%{keyword}%"
         q = q.filter(or_(User.username.ilike(like), User.name.ilike(like)))
+    if role:
+        q = q.filter(User.role == role)
+    if is_active is not None:
+        q = q.filter(User.is_active == is_active)
+    if major_id:
+        q = q.filter(User.major_id == major_id)
+    if group_id:
+        q = q.filter(User.group_id == group_id)
     total = q.count()
-    items = q.order_by(User.id.asc()).offset((page - 1) * page_size).limit(page_size).all()
+    items = (
+        q.order_by(User.last_login_at.desc().nullslast(), User.id.asc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
 
     data = []
     for u in items:
@@ -47,8 +75,10 @@ def list_users(
                 "username": u.username,
                 "name": u.name,
                 "role": u.role,
+                "group_id": u.group_id,
                 "major_id": u.major_id,
                 "is_active": u.is_active,
+                "last_login_at": u.last_login_at.isoformat() if u.last_login_at else None,
             }
         )
     return ok(request, {"page": page, "page_size": page_size, "total": total, "items": data})
@@ -73,13 +103,14 @@ def create_user(
         username=payload.username,
         name=payload.name,
         role=payload.role,
+        group_id=payload.group_id,
         major_id=payload.major_id,
         password_hash=hash_password(initial_pwd),
         is_active=True,
     )
     db.add(u)
     db.commit()
-    logger.info("Admin %s created user %s", admin.username, u.username)
+    _audit("create_user", admin, u, request, {"role": u.role, "major_id": u.major_id})
     return created(request, {"id": u.id, "initial_password": initial_pwd})
 
 
@@ -94,12 +125,14 @@ def patch_user(
     u = db.query(User).filter(User.id == uid).first()
     if not u:
         raise AppError(code="RESOURCE_NOT_FOUND", message="用户不存在", status_code=404)
+    if u.username == "admin":
+        raise AppError(code="FORBIDDEN", message="默认管理员账号禁止修改", status_code=403)
 
     data = payload.model_dump(exclude_unset=True)
     for k, v in data.items():
         setattr(u, k, v)
     db.commit()
-    logger.info("Admin %s patched user %s", admin.username, u.username)
+    _audit("patch_user", admin, u, request, {"fields": list(data.keys())})
     return ok(request, {"id": u.id})
 
 
@@ -113,11 +146,13 @@ def reset_password(
     u = db.query(User).filter(User.id == uid).first()
     if not u:
         raise AppError(code="RESOURCE_NOT_FOUND", message="用户不存在", status_code=404)
+    if u.username == "admin":
+        raise AppError(code="FORBIDDEN", message="默认管理员账号禁止重置密码", status_code=403)
     new_pwd = generate_strong_password()
     u.password_hash = hash_password(new_pwd)
     db.commit()
-    logger.warning("Admin %s reset password for user %s", admin.username, u.username)
-    return AdminResetPasswordOut(id=u.id, username=u.username, new_password=new_pwd)
+    _audit("reset_password", admin, u, request)
+    return ok(request, AdminResetPasswordOut(id=u.id, username=u.username, new_password=new_pwd).model_dump())
 
 
 @router.get("/reports/resources")

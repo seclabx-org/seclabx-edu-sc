@@ -117,6 +117,23 @@ export async function uploadFile(resourceId: number, file: File) {
 }
 
 export const adminApi = {
-  users: (page = 1, pageSize = 20, keyword?: string) =>
-    apiFetch(`/admin/users?page=${page}&page_size=${pageSize}${keyword ? `&keyword=${keyword}` : ""}`),
+  users: (params: Record<string, string | number | boolean | undefined> = {}) => {
+    const query = new URLSearchParams();
+    const defaults = { page: 1, page_size: 20 };
+    Object.entries({ ...defaults, ...params }).forEach(([k, v]) => {
+      if (v !== undefined && v !== null) query.append(k, String(v));
+    });
+    return apiFetch(`/admin/users${query.toString() ? `?${query.toString()}` : ""}`);
+  },
+  createUser: (payload: any) =>
+    apiFetch(`/admin/users`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  updateUser: (id: number, payload: any) =>
+    apiFetch(`/admin/users/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+  resetPassword: (id: number) => apiFetch(`/admin/users/${id}/reset-password`, { method: "POST" }),
 };
