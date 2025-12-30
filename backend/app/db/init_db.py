@@ -54,13 +54,19 @@ def seed(db: Session):
         t = db.query(IdeologyTag).filter(IdeologyTag.name == name).first()
         if not t:
             db.add(IdeologyTag(name=name, sort_order=order, is_active=True))
+            db.flush()
+    tag_rows = db.query(IdeologyTag).all()
+    tag_map = {t.name: t.id for t in tag_rows}
 
     major_one = db.query(Major).filter(Major.name == "信息安全技术应用").first()
     course_map: dict[str, int] = {}
     if major_one:
         courses = [
-            ("网络安全法律法规", "2025-2026-1"),
-            ("Web安全基础", "2025-2026-1"),
+            ("信息安全技术与实施", "2025-2026-1"),
+            ("Web应用安全与防护", "2025-2026-1"),
+            ("信息安全风险评估", "2025-2026-1"),
+            ("Web应用开发", "2025-2026-1"),
+            ("操作系统安全", "2025-2026-1"),
         ]
         for name, term in courses:
             c = db.query(Course).filter(Course.major_id == major_one.id, Course.name == name).first()
@@ -102,9 +108,10 @@ def seed(db: Session):
                 "file_type": "mp4",
                 "external_url": "/sample-files/demo-video.mp4",
                 "cover_url": "/sample-covers/demo-cover-video.jpg",
-                "duration_seconds": 600,
+                "duration_seconds": 31,
                 "audience": "大一 / 教师示范",
-                "course_name": "网络安全法律法规",
+                "course_name": "信息安全技术与实施",
+                "tag_names": ["国家安全"],
             },
             {
                 "title": "示例 · 思政课件模板（网络安全）",
@@ -116,7 +123,8 @@ def seed(db: Session):
                 "cover_url": "/sample-covers/demo-cover-slide.jpg",
                 "duration_seconds": None,
                 "audience": "教师备课",
-                "course_name": "Web安全基础",
+                "course_name": "Web应用安全与防护",
+                "tag_names": ["法治意识"],
             },
             {
                 "title": "示例 · 网络安全法（官方PDF）",
@@ -128,7 +136,8 @@ def seed(db: Session):
                 "cover_url": "/sample-covers/demo-cover-policy.jpg",
                 "duration_seconds": None,
                 "audience": "教师/学生",
-                "course_name": "网络安全法律法规",
+                "course_name": "信息安全风险评估",
+                "tag_names": ["国家安全", "法治意识"],
             },
             {
                 "title": "示例 · 思政案例讲稿（网络伦理）",
@@ -140,7 +149,8 @@ def seed(db: Session):
                 "cover_url": "/sample-covers/demo-cover-text.jpg",
                 "duration_seconds": None,
                 "audience": "课堂讲授",
-                "course_name": "Web安全基础",
+                "course_name": "Web应用开发",
+                "tag_names": ["网络伦理"],
             },
             {
                 "title": "示例 · 思政微课音频（国家安全观）",
@@ -150,9 +160,10 @@ def seed(db: Session):
                 "file_type": "mp3",
                 "external_url": "/sample-files/demo-audio.mp3",
                 "cover_url": "/sample-covers/demo-cover-audio.jpg",
-                "duration_seconds": 300,
+                "duration_seconds": 32,
                 "audience": "学生自学",
-                "course_name": "网络安全法律法规",
+                "course_name": "操作系统安全",
+                "tag_names": ["国家安全"],
             },
             {
                 "title": "示例 · 思政图片素材（网络安全宣传）",
@@ -164,10 +175,10 @@ def seed(db: Session):
                 "cover_url": "/sample-covers/demo-image-thumb.jpg",
                 "duration_seconds": None,
                 "audience": "课堂展示",
-                "course_name": "Web安全基础",
+                "course_name": "Web应用开发",
+                "tag_names": ["工匠精神", "网络伦理"],
             },
         ]
-        first_tag = db.query(IdeologyTag).first()
         for res in demo_resources:
             exists = db.query(Resource).filter(Resource.title == res["title"]).first()
             if exists:
@@ -199,10 +210,14 @@ def seed(db: Session):
             )
             db.add(r)
             db.flush()
-            if first_tag:
+            tag_ids = []
+            for name in res.get("tag_names") or []:
+                if name in tag_map:
+                    tag_ids.append(tag_map[name])
+            for tid in tag_ids:
                 db.execute(
                     text("INSERT INTO resource_tags(resource_id, tag_id) VALUES (:rid, :tid)"),
-                    {"rid": r.id, "tid": first_tag.id},
+                    {"rid": r.id, "tid": tid},
                 )
     db.commit()
 

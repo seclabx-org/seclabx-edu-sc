@@ -30,6 +30,10 @@ const sortOptions: SelectOption[] = [
 
 function ResourceListInner() {
   const searchParams = useSearchParams();
+  const initialGroup = searchParams.get("group_id");
+  const initialMajor = searchParams.get("major_id");
+  const initialCourse = searchParams.get("course_id");
+  const initialType = searchParams.get("resource_type");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [items, setItems] = useState<ResourceItem[]>([]);
@@ -39,12 +43,14 @@ function ResourceListInner() {
   const { user } = useAuthGuard({ redirectTo: "/resources" });
   const [onlyMine, setOnlyMine] = useState(false);
 
+  const initialTag = searchParams.get("tag_id");
+
   const [keyword, setKeyword] = useState("");
-  const [selectedType, setSelectedType] = useState("");
-  const [selectedGroup, setSelectedGroup] = useState<number | undefined>();
-  const [selectedMajor, setSelectedMajor] = useState<number | undefined>();
-  const [selectedCourse, setSelectedCourse] = useState<number | undefined>();
-  const [selectedTag, setSelectedTag] = useState<number | undefined>();
+  const [selectedType, setSelectedType] = useState(initialType || "");
+  const [selectedGroup, setSelectedGroup] = useState<number | undefined>(initialGroup ? Number(initialGroup) : undefined);
+  const [selectedMajor, setSelectedMajor] = useState<number | undefined>(initialMajor ? Number(initialMajor) : undefined);
+  const [selectedCourse, setSelectedCourse] = useState<number | undefined>(initialCourse ? Number(initialCourse) : undefined);
+  const [selectedTag, setSelectedTag] = useState<number | undefined>(initialTag ? Number(initialTag) : undefined);
   const [sort, setSort] = useState("created_at_desc");
 
   const [groups, setGroups] = useState<SelectOption[]>([{ value: "", label: "全部专业群" }]);
@@ -52,17 +58,20 @@ function ResourceListInner() {
   const [courses, setCourses] = useState<SelectOption[]>([{ value: "", label: "全部课程" }]);
   const [tags, setTags] = useState<SelectOption[]>([{ value: "", label: "全部标签" }]);
 
-  // 初始化时根据 URL 预填
+  // URL 变化时同步筛选
   useEffect(() => {
     const g = searchParams.get("group_id");
     const m = searchParams.get("major_id");
     const c = searchParams.get("course_id");
     const t = searchParams.get("resource_type");
-    if (g) setSelectedGroup(Number(g));
-    if (m) setSelectedMajor(Number(m));
-    if (c) setSelectedCourse(Number(c));
-    if (t) setSelectedType(t);
-  }, [searchParams]);
+    const tg = searchParams.get("tag_id");
+    setSelectedGroup(g ? Number(g) : undefined);
+    setSelectedMajor(m ? Number(m) : undefined);
+    setSelectedCourse(c ? Number(c) : undefined);
+    setSelectedType(t || "");
+    setSelectedTag(tg ? Number(tg) : undefined);
+    setPage(1);
+  }, [searchParams.toString()]);
 
   useEffect(() => {
     metaApi.groups().then((data) => {
@@ -74,12 +83,10 @@ function ResourceListInner() {
   }, []);
 
   useEffect(() => {
-    // 专业依赖专业群
+    // 专业依赖专业群，但不在这里清空，清空放在选择事件中
     metaApi.majors(selectedGroup).then((data) => {
       setMajors([{ value: "", label: "全部专业" }, ...data.map((m: any) => ({ value: m.id, label: m.name }))]);
     });
-    setSelectedMajor(undefined);
-    setSelectedCourse(undefined);
   }, [selectedGroup]);
 
   useEffect(() => {
@@ -90,8 +97,8 @@ function ResourceListInner() {
       });
     } else {
       setCourses([{ value: "", label: "全部课程" }]);
+      setSelectedCourse(undefined);
     }
-    setSelectedCourse(undefined);
   }, [selectedMajor]);
 
   useEffect(() => {
@@ -124,7 +131,12 @@ function ResourceListInner() {
 
   const totalPages = useMemo(() => Math.max(1, Math.ceil(total / pageSize)), [total, pageSize]);
 
-  const renderSelect = (label: string, value: string | number | undefined, onChange: (v: string) => void, options: SelectOption[]) => (
+  const renderSelect = (
+    label: string,
+    value: string | number | undefined,
+    onChange: (v: string) => void,
+    options: SelectOption[],
+  ) => (
     <label className="flex flex-col text-xs text-slate-600">
       <span className="mb-1">{label}</span>
       <select
@@ -179,8 +191,15 @@ function ResourceListInner() {
           />
         </label>
         {renderSelect("类型", selectedType, (v) => setSelectedType(v), typeOptions)}
-        {renderSelect("专业群", selectedGroup, (v) => setSelectedGroup(v ? Number(v) : undefined), groups)}
-        {renderSelect("专业", selectedMajor, (v) => setSelectedMajor(v ? Number(v) : undefined), majors)}
+        {renderSelect("专业群", selectedGroup, (v) => {
+          setSelectedGroup(v ? Number(v) : undefined);
+          setSelectedMajor(undefined);
+          setSelectedCourse(undefined);
+        }, groups)}
+        {renderSelect("专业", selectedMajor, (v) => {
+          setSelectedMajor(v ? Number(v) : undefined);
+          setSelectedCourse(undefined);
+        }, majors)}
         {renderSelect("课程", selectedCourse, (v) => setSelectedCourse(v ? Number(v) : undefined), courses)}
         {renderSelect("标签", selectedTag, (v) => setSelectedTag(v ? Number(v) : undefined), tags)}
         {renderSelect("排序", sort, (v) => setSort(v), sortOptions)}

@@ -78,6 +78,13 @@ export const resourceApi = {
     });
     return apiFetch(`/resources/summary${query.toString() ? `?${query.toString()}` : ""}`);
   },
+  tagsCloud: (params: Record<string, string | number | undefined> = {}) => {
+    const query = new URLSearchParams();
+    Object.entries(params).forEach(([k, v]) => {
+      if (v !== undefined && v !== null) query.append(k, String(v));
+    });
+    return apiFetch(`/resources/tags-cloud${query.toString() ? `?${query.toString()}` : ""}`);
+  },
   create: (payload: any) =>
     apiFetch("/resources", {
       method: "POST",

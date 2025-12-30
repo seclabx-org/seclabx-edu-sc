@@ -255,14 +255,14 @@ def list_resources(
             "cover_url": r.cover_url,
             "duration_seconds": r.duration_seconds,
             "audience": r.audience,
-            "owner": {"id": r.owner_user_id, "name": owner.name if owner else None, "username": owner.username if owner else None},
+            "owner": None,
         }
         if user:
             base.update(
                 {
                     "can_download": _calc_can_download(user, r),
                     "can_edit": _calc_can_edit(user, r),
-                    "owner": {"id": r.owner_user_id, "name": None},
+                    "owner": {"id": r.owner_user_id, "name": owner.name if owner else None, "username": owner.username if owner else None},
                 }
             )
         items.append(base)
@@ -405,6 +405,48 @@ def summary(
         )
 
     raise validation_error("level 必须是group/major/course/type 之一")
+
+
+@router.get("/tags-cloud")
+def tags_cloud(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User | None = Depends(get_optional_user),
+    group_id: int | None = None,
+    major_id: int | None = None,
+    course_id: int | None = None,
+    limit: int = 50,
+):
+    """
+    标签云：统计已发布资源的标签数量，支持按专业群/专业/课程过滤。
+    未登录：仅统计已发布；教师：发布+自己的；管理员：全部。
+    """
+    limit = max(1, min(limit, 200))
+    res_q = db.query(Resource)
+    if not user:
+        res_q = res_q.filter(Resource.status == "published")
+    else:
+        if user.role != "admin":
+            res_q = res_q.filter(or_(Resource.status == "published", Resource.owner_user_id == user.id))
+    if group_id:
+        res_q = res_q.filter(Resource.group_id == group_id)
+    if major_id:
+        res_q = res_q.filter(Resource.major_id == major_id)
+    if course_id:
+        res_q = res_q.filter(Resource.course_id == course_id)
+
+    res_sub = res_q.subquery()
+    rows = (
+        db.query(IdeologyTag.id, IdeologyTag.name, func.count(res_sub.c.id))
+        .join(resource_tags, resource_tags.c.tag_id == IdeologyTag.id)
+        .join(res_sub, resource_tags.c.resource_id == res_sub.c.id)
+        .group_by(IdeologyTag.id, IdeologyTag.name)
+        .order_by(func.count(res_sub.c.id).desc(), IdeologyTag.id.asc())
+        .limit(limit)
+        .all()
+    )
+    items = [{"tag_id": tid, "tag_name": name, "count": int(cnt or 0)} for tid, name, cnt in rows if cnt]
+    return ok(request, {"items": items})
 
 
 @router.get("/{rid}")
