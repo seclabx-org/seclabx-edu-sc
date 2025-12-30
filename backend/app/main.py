@@ -7,8 +7,11 @@ from app.core.request_id import RequestIdMiddleware
 from app.core.response import err
 from app.core.errors import AppError
 from app.api.routes import auth, meta, resources, admin, files
+from app.db.auto_migrate import run_migrations_safely
+import logging
 
 setup_logging()
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title=settings.APP_NAME)
 
@@ -28,6 +31,12 @@ app.include_router(meta.router)
 app.include_router(resources.router)
 app.include_router(files.router)
 app.include_router(admin.router)
+
+
+@app.on_event("startup")
+async def startup_migrate():
+    # 启动时自动执行轻量迁移，避免版本升级后遗漏新列/表
+    run_migrations_safely()
 
 
 @app.exception_handler(AppError)

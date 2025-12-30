@@ -9,6 +9,7 @@ class ProfessionalGroup(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
     code: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
 
@@ -30,6 +31,7 @@ class Course(Base):
     major_id: Mapped[int] = mapped_column(ForeignKey("majors.id"), nullable=False)
     name: Mapped[str] = mapped_column(String(150), nullable=False)
     term: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
 

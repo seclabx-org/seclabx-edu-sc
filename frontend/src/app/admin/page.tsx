@@ -1,3 +1,4 @@
+﻿
 "use client";
 
 import Link from "next/link";
@@ -21,6 +22,18 @@ type UserRow = {
 
 type GroupOption = { label: string; value: string | number };
 type MajorOption = { id: number; name: string; group_id: number | null };
+type MetaItem = {
+  id: number;
+  name: string;
+  code?: string | null;
+  group_id?: number | null;
+  major_id?: number | null;
+  term?: string | null;
+  sort_order?: number;
+  is_active: boolean;
+  resource_count?: number;
+};
+type MetaTab = "groups" | "majors" | "courses" | "tags";
 
 export default function AdminPage() {
   const { user, loading } = useAuthGuard({ requiredRole: "admin" });
@@ -35,14 +48,23 @@ export default function AdminPage() {
   const [majorFilter, setMajorFilter] = useState<string>("");
   const [loadingList, setLoadingList] = useState(false);
   const [editId, setEditId] = useState<number | null>(null);
-  const [editForm, setEditForm] = useState<{ name: string; role: string; group_id: string; major_id: string; is_active: boolean }>({
-    name: "",
-    role: "teacher",
-    group_id: "",
-    major_id: "",
-    is_active: true,
-  });
-  const [createForm, setCreateForm] = useState<{ username: string; name: string; role: string; group_id: string; major_id: string; initial_password: string }>({
+  const [editForm, setEditForm] = useState<{ name: string; role: string; group_id: string; major_id: string; is_active: boolean }>(
+    {
+      name: "",
+      role: "teacher",
+      group_id: "",
+      major_id: "",
+      is_active: true,
+    }
+  );
+  const [createForm, setCreateForm] = useState<{
+    username: string;
+    name: string;
+    role: string;
+    group_id: string;
+    major_id: string;
+    initial_password: string;
+  }>({
     username: "",
     name: "",
     role: "teacher",
@@ -52,6 +74,14 @@ export default function AdminPage() {
   });
   const [lastReset, setLastReset] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+
+  // 元数据
+  const [metaTab, setMetaTab] = useState<MetaTab>("groups");
+  const [metaData, setMetaData] = useState<MetaItem[]>([]);
+  const [metaLoading, setMetaLoading] = useState(false);
+  const [metaError, setMetaError] = useState<string | null>(null);
+  const [metaForm, setMetaForm] = useState<any>({});
+  const [metaEditId, setMetaEditId] = useState<number | null>(null);
 
   const groupNameMap = useMemo(() => {
     const map = new Map<number, string>();
@@ -108,6 +138,7 @@ export default function AdminPage() {
       setMajors(data.map((m: any) => ({ id: m.id, name: m.name, group_id: m.group_id ?? null })));
     });
     fetchUsers();
+    loadMeta("groups");
   }, [user]);
 
   const startEdit = (u: UserRow) => {
@@ -176,6 +207,205 @@ export default function AdminPage() {
   const groupColumnLabel = (gid?: number | null) => (gid ? groupNameMap.get(gid) || gid : "—");
   const majorColumnLabel = (mid?: number | null) => (mid ? majorNameMap.get(mid)?.name || mid : "—");
 
+  // 元数据
+  const metaLoaders: Record<MetaTab, () => Promise<any>> = {
+    groups: () => adminApi.metaGroups(),
+    majors: () => adminApi.metaMajors(),
+    courses: () => adminApi.metaCourses(),
+    tags: () => adminApi.metaTags(),
+  };
+
+  const loadMeta = (tab: MetaTab = metaTab) => {
+    setMetaLoading(true);
+    setMetaError(null);
+    metaLoaders[tab]()
+      .then((data) => {
+        setMetaData(data.items || []);
+        setMetaEditId(null);
+        setMetaForm({});
+      })
+      .catch((e: any) => setMetaError(e.message || "加载失败"))
+      .finally(() => setMetaLoading(false));
+  };
+
+  const metaSave = async () => {
+    try {
+      const payload: any = { ...metaForm };
+      // 前置必填校验
+      if (!payload.name || String(payload.name).trim() === "") {
+        setMetaError("名称必填");
+        return;
+      }
+      if (metaTab === "majors" && (!payload.group_id || String(payload.group_id).trim() === "")) {
+        setMetaError("请选择专业群");
+        return;
+      }
+      if (metaTab === "courses" && (!payload.major_id || String(payload.major_id).trim() === "")) {
+        setMetaError("请选择专业");
+        return;
+      }
+      if (payload.is_active === undefined) {
+        payload.is_active = true;
+      }
+      if (payload.group_id !== undefined) payload.group_id = payload.group_id ? Number(payload.group_id) : null;
+      if (payload.major_id !== undefined) payload.major_id = payload.major_id ? Number(payload.major_id) : null;
+      if (payload.sort_order !== undefined) payload.sort_order = Number(payload.sort_order) || 0;
+      if (metaEditId) {
+        const updateMap: Record<MetaTab, (id: number, p: any) => Promise<any>> = {
+          groups: adminApi.updateGroup,
+          majors: adminApi.updateMajor,
+          courses: adminApi.updateCourse,
+          tags: adminApi.updateTag,
+        };
+        await updateMap[metaTab](metaEditId, payload);
+      } else {
+        const createMap: Record<MetaTab, (p: any) => Promise<any>> = {
+          groups: adminApi.createGroup,
+          majors: adminApi.createMajor,
+          courses: adminApi.createCourse,
+          tags: adminApi.createTag,
+        };
+        await createMap[metaTab](payload);
+      }
+      setSuccess("保存成功");
+      loadMeta(metaTab);
+    } catch (e: any) {
+      setMetaError(e.message || "保存失败");
+    }
+  };
+
+  const metaToggleActive = async (item: MetaItem) => {
+    try {
+      const updateMap: Record<MetaTab, (id: number, p: any) => Promise<any>> = {
+        groups: adminApi.updateGroup,
+        majors: adminApi.updateMajor,
+        courses: adminApi.updateCourse,
+        tags: adminApi.updateTag,
+      };
+      await updateMap[metaTab](item.id, { is_active: !item.is_active });
+      loadMeta(metaTab);
+    } catch (e: any) {
+      setMetaError(e.message || "更新失败");
+    }
+  };
+
+  const metaStartEdit = (item: MetaItem) => {
+    setMetaEditId(item.id);
+    setMetaForm({
+      name: item.name,
+      code: item.code || "",
+      sort_order: item.sort_order ?? 0,
+      is_active: item.is_active,
+      group_id: item.group_id ? String(item.group_id) : "",
+      major_id: item.major_id ? String(item.major_id) : "",
+      term: item.term || "",
+    });
+  };
+
+  const metaTitleMap: Record<MetaTab, string> = {
+    groups: "专业群",
+    majors: "专业",
+    courses: "课程",
+    tags: "标签",
+  };
+
+  const metaFormFields = () => {
+    switch (metaTab) {
+      case "groups":
+        return (
+          <>
+            <label className="flex flex-col gap-1 text-xs text-slate-600">
+              名称
+              <input value={metaForm.name || ""} onChange={(e) => setMetaForm({ ...metaForm, name: e.target.value })} className="rounded border px-2 py-1 text-sm" />
+            </label>
+            <label className="flex flex-col gap-1 text-xs text-slate-600">
+              编码（可选）
+              <input value={metaForm.code || ""} onChange={(e) => setMetaForm({ ...metaForm, code: e.target.value })} className="rounded border px-2 py-1 text-sm" />
+            </label>
+          </>
+        );
+      case "majors":
+        return (
+          <>
+            <label className="flex flex-col gap-1 text-xs text-slate-600">
+              专业群
+              <select value={metaForm.group_id || ""} onChange={(e) => setMetaForm({ ...metaForm, group_id: e.target.value })} className="rounded border px-2 py-1 text-sm">
+                <option value="">请选择</option>
+                {groups
+                  .filter((g) => g.value !== "")
+                  .map((g) => (
+                    <option key={g.value} value={g.value}>
+                      {g.label}
+                    </option>
+                  ))}
+              </select>
+            </label>
+            <label className="flex flex-col gap-1 text-xs text-slate-600">
+              名称
+              <input value={metaForm.name || ""} onChange={(e) => setMetaForm({ ...metaForm, name: e.target.value })} className="rounded border px-2 py-1 text-sm" />
+            </label>
+            <label className="flex flex-col gap-1 text-xs text-slate-600">
+              编码（可选）
+              <input value={metaForm.code || ""} onChange={(e) => setMetaForm({ ...metaForm, code: e.target.value })} className="rounded border px-2 py-1 text-sm" />
+            </label>
+          </>
+        );
+      case "courses":
+        return (
+          <>
+            <label className="flex flex-col gap-1 text-xs text-slate-600">
+              专业
+              <select value={metaForm.major_id || ""} onChange={(e) => setMetaForm({ ...metaForm, major_id: e.target.value })} className="rounded border px-2 py-1 text-sm">
+                <option value="">请选择</option>
+                {majors.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="flex flex-col gap-1 text-xs text-slate-600">
+              名称
+              <input value={metaForm.name || ""} onChange={(e) => setMetaForm({ ...metaForm, name: e.target.value })} className="rounded border px-2 py-1 text-sm" />
+            </label>
+            <label className="flex flex-col gap-1 text-xs text-slate-600">
+              学期/学年（可选）
+              <input value={metaForm.term || ""} onChange={(e) => setMetaForm({ ...metaForm, term: e.target.value })} className="rounded border px-2 py-1 text-sm" />
+            </label>
+          </>
+        );
+      case "tags":
+        return (
+          <label className="flex flex-col gap-1 text-xs text-slate-600">
+            名称
+            <input value={metaForm.name || ""} onChange={(e) => setMetaForm({ ...metaForm, name: e.target.value })} className="rounded border px-2 py-1 text-sm" />
+          </label>
+        );
+    }
+  };
+
+  const metaListColumns = (item: MetaItem) => (
+    <>
+      <td className="px-3 py-2 text-sm text-slate-700">{item.name}</td>
+      {metaTab === "groups" && <td className="px-3 py-2 text-sm text-slate-500">{item.code || "—"}</td>}
+      {metaTab === "majors" && <td className="px-3 py-2 text-sm text-slate-500">{item.group_id ? groupNameMap.get(item.group_id) || item.group_id : "—"}</td>}
+      {metaTab === "courses" && <td className="px-3 py-2 text-sm text-slate-500">{item.major_id ? majorNameMap.get(item.major_id)?.name || item.major_id : "—"}</td>}
+      {metaTab === "courses" && <td className="px-3 py-2 text-sm text-slate-500">{item.term || "—"}</td>}
+      {metaTab === "tags" && <td className="px-3 py-2 text-sm text-slate-500">—</td>}
+      <td className="px-3 py-2 text-sm text-slate-500">{item.sort_order ?? 0}</td>
+      <td className="px-3 py-2 text-sm text-slate-500">{item.resource_count ?? 0}</td>
+      <td className="px-3 py-2 text-sm">{item.is_active ? "启用" : "禁用"}</td>
+      <td className="px-3 py-2 text-sm space-x-2">
+        <button onClick={() => metaStartEdit(item)} className="rounded border px-2 py-1 text-xs">
+          编辑
+        </button>
+        <button onClick={() => metaToggleActive(item)} className="rounded border px-2 py-1 text-xs">
+          {item.is_active ? "禁用" : "启用"}
+        </button>
+      </td>
+    </>
+  );
+
   if (loading) {
     return (
       <div className="rounded border bg-white p-4 text-sm text-slate-600">
@@ -197,16 +427,17 @@ export default function AdminPage() {
   const editMajorOptions = majorOptionsFor(editForm.group_id);
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">管理后台 · 用户管理</h1>
+        <h1 className="text-2xl font-semibold">管理后台</h1>
         <Link href="/dashboard" className="text-sm text-brand underline hover:text-brand">
           返回工作台
         </Link>
       </div>
 
+      {/* 用户管理 */}
       <div className="rounded border bg-white p-4 space-y-3">
-        <h3 className="text-sm font-semibold text-slate-900">筛选</h3>
+        <h3 className="text-sm font-semibold text-slate-900">用户管理 · 筛选</h3>
         <div className="grid gap-3 md:grid-cols-5 text-xs text-slate-600">
           <label className="flex flex-col gap-1">
             关键词
@@ -289,11 +520,7 @@ export default function AdminPage() {
               value={createForm.group_id}
               onChange={(e) => {
                 const gid = e.target.value;
-                setCreateForm((prev) => ({
-                  ...prev,
-                  group_id: gid,
-                  major_id: ensureMajorMatchGroup(gid, prev.major_id),
-                }));
+                setCreateForm((prev) => ({ ...prev, group_id: gid, major_id: ensureMajorMatchGroup(gid, prev.major_id) }));
               }}
               className="rounded border px-2 py-1 text-sm"
             >
@@ -360,22 +587,14 @@ export default function AdminPage() {
                   <td className="px-4 py-2">{u.username}</td>
                   <td className="px-4 py-2">
                     {isEditing ? (
-                      <input
-                        value={editForm.name}
-                        onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
-                        className="w-full rounded border px-2 py-1 text-sm"
-                      />
+                      <input value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} className="w-full rounded border px-2 py-1 text-sm" />
                     ) : (
                       u.name
                     )}
                   </td>
                   <td className="px-4 py-2">
                     {isEditing ? (
-                      <select
-                        value={editForm.role}
-                        onChange={(e) => setEditForm({ ...editForm, role: e.target.value })}
-                        className="rounded border px-2 py-1 text-sm"
-                      >
+                      <select value={editForm.role} onChange={(e) => setEditForm({ ...editForm, role: e.target.value })} className="rounded border px-2 py-1 text-sm">
                         <option value="admin">管理员</option>
                         <option value="teacher">教师</option>
                       </select>
@@ -389,11 +608,7 @@ export default function AdminPage() {
                         value={editForm.group_id}
                         onChange={(e) => {
                           const gid = e.target.value;
-                          setEditForm((prev) => ({
-                            ...prev,
-                            group_id: gid,
-                            major_id: ensureMajorMatchGroup(gid, prev.major_id),
-                          }));
+                          setEditForm((prev) => ({ ...prev, group_id: gid, major_id: ensureMajorMatchGroup(gid, prev.major_id) }));
                         }}
                         className="rounded border px-2 py-1 text-sm"
                       >
@@ -409,11 +624,7 @@ export default function AdminPage() {
                   </td>
                   <td className="px-4 py-2">
                     {isEditing ? (
-                      <select
-                        value={editForm.major_id}
-                        onChange={(e) => setEditForm({ ...editForm, major_id: e.target.value })}
-                        className="rounded border px-2 py-1 text-sm"
-                      >
+                      <select value={editForm.major_id} onChange={(e) => setEditForm({ ...editForm, major_id: e.target.value })} className="rounded border px-2 py-1 text-sm">
                         {editMajorOptions.map((m) => (
                           <option key={m.value} value={m.value}>
                             {m.label}
@@ -426,11 +637,7 @@ export default function AdminPage() {
                   </td>
                   <td className="px-4 py-2">
                     {isEditing ? (
-                      <select
-                        value={String(editForm.is_active)}
-                        onChange={(e) => setEditForm({ ...editForm, is_active: e.target.value === "true" })}
-                        className="rounded border px-2 py-1 text-sm"
-                      >
+                      <select value={String(editForm.is_active)} onChange={(e) => setEditForm({ ...editForm, is_active: e.target.value === "true" })} className="rounded border px-2 py-1 text-sm">
                         <option value="true">启用</option>
                         <option value="false">禁用</option>
                       </select>
@@ -508,6 +715,99 @@ export default function AdminPage() {
           </div>
         </div>
       )}
+
+      {/* 元数据管理 */}
+      <div className="rounded border bg-white p-4 space-y-3">
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-slate-900">元数据管理</h3>
+          <div className="flex gap-2 text-xs">
+            {(["groups", "majors", "courses", "tags"] as MetaTab[]).map((tab) => (
+              <button
+                key={tab}
+                onClick={() => {
+                  setMetaTab(tab);
+                  loadMeta(tab);
+                }}
+                className={`rounded px-3 py-1 border ${metaTab === tab ? "bg-brand text-white" : "bg-white text-slate-700"}`}
+              >
+                {metaTitleMap[tab]}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="grid gap-3 md:grid-cols-4 text-xs text-slate-600">
+          {metaFormFields()}
+          <label className="flex flex-col gap-1 text-xs text-slate-600">
+            排序
+            <input type="number" value={metaForm.sort_order ?? 0} onChange={(e) => setMetaForm({ ...metaForm, sort_order: Number(e.target.value) })} className="rounded border px-2 py-1 text-sm" />
+          </label>
+          <label className="flex flex-col gap-1 text-xs text-slate-600">
+            状态
+            <select value={String(metaForm.is_active ?? true)} onChange={(e) => setMetaForm({ ...metaForm, is_active: e.target.value === "true" })} className="rounded border px-2 py-1 text-sm">
+              <option value="true">启用</option>
+              <option value="false">禁用</option>
+            </select>
+          </label>
+          <div className="flex items-end gap-2">
+            <button onClick={metaSave} className="rounded bg-brand px-3 py-2 text-sm text-white hover:opacity-90">
+              {metaEditId ? "保存修改" : "新建"}
+            </button>
+            {metaEditId && (
+              <button
+                onClick={() => {
+                  setMetaEditId(null);
+                  setMetaForm({});
+                }}
+                className="rounded border px-3 py-2 text-sm"
+              >
+                取消编辑
+              </button>
+            )}
+          </div>
+        </div>
+        {metaError && <div className="rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{metaError}</div>}
+        <div className="overflow-auto rounded border">
+          <table className="min-w-full text-sm">
+            <thead className="bg-slate-50 text-xs uppercase text-slate-600">
+              <tr>
+                <th className="px-3 py-2 text-left">名称</th>
+                {metaTab === "groups" && <th className="px-3 py-2 text-left">编码</th>}
+                {metaTab === "majors" && <th className="px-3 py-2 text-left">专业群</th>}
+                {metaTab === "courses" && <th className="px-3 py-2 text-left">专业</th>}
+                {metaTab === "courses" && <th className="px-3 py-2 text-left">学期</th>}
+                {metaTab === "tags" && <th className="px-3 py-2 text-left">描述</th>}
+                <th className="px-3 py-2 text-left">排序</th>
+                <th className="px-3 py-2 text-left">关联资源</th>
+                <th className="px-3 py-2 text-left">状态</th>
+                <th className="px-3 py-2 text-left">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {metaLoading ? (
+                <tr>
+                  <td className="px-3 py-3 text-sm text-slate-500" colSpan={8}>
+                    加载中...
+                  </td>
+                </tr>
+              ) : metaData.length === 0 ? (
+                <tr>
+                  <td className="px-3 py-3 text-sm text-slate-500" colSpan={8}>
+                    暂无数据
+                  </td>
+                </tr>
+              ) : (
+                metaData.map((item) => (
+                  <tr key={`${metaTab}-${item.id}`} className="border-t">
+                    {metaListColumns(item)}
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
   );
 }
+
+

@@ -136,4 +136,24 @@ export const adminApi = {
       body: JSON.stringify(payload),
     }),
   resetPassword: (id: number) => apiFetch(`/admin/users/${id}/reset-password`, { method: "POST" }),
+  metaGroups: () => apiFetch("/admin/meta/groups"),
+  metaMajors: () => apiFetch("/admin/meta/majors"),
+  metaCourses: () => apiFetch("/admin/meta/courses"),
+  metaTags: () => apiFetch("/admin/meta/tags"),
+  createGroup: (payload: any) =>
+    apiFetch("/admin/meta/groups", { method: "POST", body: JSON.stringify(payload) }),
+  updateGroup: (id: number, payload: any) =>
+    apiFetch(`/admin/meta/groups/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),
+  createMajor: (payload: any) =>
+    apiFetch("/admin/meta/majors", { method: "POST", body: JSON.stringify(payload) }),
+  updateMajor: (id: number, payload: any) =>
+    apiFetch(`/admin/meta/majors/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),
+  createCourse: (payload: any) =>
+    apiFetch("/admin/meta/courses", { method: "POST", body: JSON.stringify(payload) }),
+  updateCourse: (id: number, payload: any) =>
+    apiFetch(`/admin/meta/courses/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),
+  createTag: (payload: any) =>
+    apiFetch("/admin/meta/tags", { method: "POST", body: JSON.stringify(payload) }),
+  updateTag: (id: number, payload: any) =>
+    apiFetch(`/admin/meta/tags/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),
 };

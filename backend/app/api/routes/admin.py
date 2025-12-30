@@ -11,8 +11,21 @@ from app.core.security import hash_password, validate_password_strength, generat
 from app.core.errors import AppError
 from app.core.config import settings
 from app.models.user import User
-from app.models.resource import Resource
-from app.schemas.admin import AdminUserCreateIn, AdminUserPatchIn, AdminResetPasswordOut
+from app.models.resource import Resource, resource_tags
+from app.models.meta import ProfessionalGroup, Major, Course, IdeologyTag
+from app.schemas.admin import (
+    AdminUserCreateIn,
+    AdminUserPatchIn,
+    AdminResetPasswordOut,
+    GroupCreateIn,
+    GroupPatchIn,
+    MajorCreateIn,
+    MajorPatchIn,
+    CourseCreateIn,
+    CoursePatchIn,
+    TagCreateIn,
+    TagPatchIn,
+)
 import logging
 
 logger = logging.getLogger(__name__)
@@ -153,6 +166,226 @@ def reset_password(
     db.commit()
     _audit("reset_password", admin, u, request)
     return ok(request, AdminResetPasswordOut(id=u.id, username=u.username, new_password=new_pwd).model_dump())
+
+
+def _res_count_by(db: Session, field, value):
+    return (
+        db.query(func.count(Resource.id))
+        .filter(field == value)
+        .scalar()
+    )
+
+
+@router.get("/meta/groups")
+def admin_groups(request: Request, db: Session = Depends(get_db), admin: User = Depends(require_roles("admin"))):
+    rows = db.query(ProfessionalGroup).order_by(ProfessionalGroup.sort_order.asc(), ProfessionalGroup.id.asc()).all()
+    data = []
+    for g in rows:
+        data.append(
+            {
+                "id": g.id,
+                "name": g.name,
+                "code": g.code,
+                "sort_order": g.sort_order,
+                "is_active": g.is_active,
+                "resource_count": _res_count_by(db, Resource.group_id, g.id),
+            }
+        )
+    return ok(request, {"items": data})
+
+
+@router.post("/meta/groups")
+def create_group(payload: GroupCreateIn, request: Request, db: Session = Depends(get_db), admin: User = Depends(require_roles("admin"))):
+    exists = db.query(ProfessionalGroup).filter(func.lower(ProfessionalGroup.name) == payload.name.lower()).first()
+    if exists:
+        raise AppError(code="RESOURCE_CONFLICT", message="专业群已存在", status_code=409)
+    g = ProfessionalGroup(
+        name=payload.name,
+        code=payload.code,
+        sort_order=payload.sort_order or 0,
+        is_active=True if payload.is_active is None else payload.is_active,
+    )
+    db.add(g)
+    db.commit()
+    return created(request, {"id": g.id})
+
+
+@router.patch("/meta/groups/{gid}")
+def patch_group(gid: int, payload: GroupPatchIn, request: Request, db: Session = Depends(get_db), admin: User = Depends(require_roles("admin"))):
+    g = db.query(ProfessionalGroup).filter(ProfessionalGroup.id == gid).first()
+    if not g:
+        raise AppError(code="RESOURCE_NOT_FOUND", message="专业群不存在", status_code=404)
+    data = payload.model_dump(exclude_unset=True)
+    if "sort_order" in data and data["sort_order"] is None:
+        data.pop("sort_order")
+    if "is_active" in data and data["is_active"] is None:
+        data.pop("is_active")
+    for k, v in data.items():
+        setattr(g, k, v)
+    db.commit()
+    return ok(request, {"id": g.id})
+
+
+@router.get("/meta/majors")
+def admin_majors(request: Request, db: Session = Depends(get_db), admin: User = Depends(require_roles("admin"))):
+    rows = db.query(Major).order_by(Major.sort_order.asc(), Major.id.asc()).all()
+    data = []
+    for m in rows:
+        data.append(
+            {
+                "id": m.id,
+                "group_id": m.group_id,
+                "name": m.name,
+                "code": m.code,
+                "sort_order": m.sort_order,
+                "is_active": m.is_active,
+                "resource_count": _res_count_by(db, Resource.major_id, m.id),
+            }
+        )
+    return ok(request, {"items": data})
+
+
+@router.post("/meta/majors")
+def create_major(payload: MajorCreateIn, request: Request, db: Session = Depends(get_db), admin: User = Depends(require_roles("admin"))):
+    exists = db.query(Major).filter(Major.group_id == payload.group_id, func.lower(Major.name) == payload.name.lower()).first()
+    if exists:
+        raise AppError(code="RESOURCE_CONFLICT", message="专业已存在", status_code=409)
+    m = Major(
+        group_id=payload.group_id,
+        name=payload.name,
+        code=payload.code,
+        sort_order=payload.sort_order or 0,
+        is_active=True if payload.is_active is None else payload.is_active,
+    )
+    db.add(m)
+    db.commit()
+    return created(request, {"id": m.id})
+
+
+@router.patch("/meta/majors/{mid}")
+def patch_major(mid: int, payload: MajorPatchIn, request: Request, db: Session = Depends(get_db), admin: User = Depends(require_roles("admin"))):
+    m = db.query(Major).filter(Major.id == mid).first()
+    if not m:
+        raise AppError(code="RESOURCE_NOT_FOUND", message="专业不存在", status_code=404)
+    data = payload.model_dump(exclude_unset=True)
+    if "sort_order" in data and data["sort_order"] is None:
+        data.pop("sort_order")
+    if "is_active" in data and data["is_active"] is None:
+        data.pop("is_active")
+    for k, v in data.items():
+        setattr(m, k, v)
+    db.commit()
+    return ok(request, {"id": m.id})
+
+
+@router.get("/meta/courses")
+def admin_courses(request: Request, db: Session = Depends(get_db), admin: User = Depends(require_roles("admin"))):
+    rows = db.query(Course).order_by(Course.sort_order.asc(), Course.id.asc()).all()
+    data = []
+    for c in rows:
+        data.append(
+            {
+                "id": c.id,
+                "major_id": c.major_id,
+                "name": c.name,
+                "term": c.term,
+                "sort_order": c.sort_order,
+                "is_active": c.is_active,
+                "resource_count": _res_count_by(db, Resource.course_id, c.id),
+            }
+        )
+    return ok(request, {"items": data})
+
+
+@router.post("/meta/courses")
+def create_course(payload: CourseCreateIn, request: Request, db: Session = Depends(get_db), admin: User = Depends(require_roles("admin"))):
+    exists = (
+        db.query(Course)
+        .filter(Course.major_id == payload.major_id, func.lower(Course.name) == payload.name.lower())
+        .first()
+    )
+    if exists:
+        raise AppError(code="RESOURCE_CONFLICT", message="课程已存在", status_code=409)
+    c = Course(
+        major_id=payload.major_id,
+        name=payload.name,
+        term=payload.term,
+        sort_order=payload.sort_order or 0,
+        is_active=True if payload.is_active is None else payload.is_active,
+    )
+    db.add(c)
+    db.commit()
+    return created(request, {"id": c.id})
+
+
+@router.patch("/meta/courses/{cid}")
+def patch_course(cid: int, payload: CoursePatchIn, request: Request, db: Session = Depends(get_db), admin: User = Depends(require_roles("admin"))):
+    c = db.query(Course).filter(Course.id == cid).first()
+    if not c:
+        raise AppError(code="RESOURCE_NOT_FOUND", message="课程不存在", status_code=404)
+    data = payload.model_dump(exclude_unset=True)
+    if "sort_order" in data and data["sort_order"] is None:
+        data.pop("sort_order")
+    if "is_active" in data and data["is_active"] is None:
+        data.pop("is_active")
+    for k, v in data.items():
+        setattr(c, k, v)
+    db.commit()
+    return ok(request, {"id": c.id})
+
+
+@router.get("/meta/tags")
+def admin_tags(request: Request, db: Session = Depends(get_db), admin: User = Depends(require_roles("admin"))):
+    rows = db.query(IdeologyTag).order_by(IdeologyTag.sort_order.asc(), IdeologyTag.id.asc()).all()
+    data = []
+    for t in rows:
+        count = (
+            db.query(func.count(Resource.id))
+            .join(resource_tags, resource_tags.c.resource_id == Resource.id)
+            .filter(resource_tags.c.tag_id == t.id)
+            .scalar()
+        )
+        data.append(
+            {
+                "id": t.id,
+                "name": t.name,
+                "sort_order": t.sort_order,
+                "is_active": t.is_active,
+                "resource_count": count,
+            }
+        )
+    return ok(request, {"items": data})
+
+
+@router.post("/meta/tags")
+def create_tag(payload: TagCreateIn, request: Request, db: Session = Depends(get_db), admin: User = Depends(require_roles("admin"))):
+    exists = db.query(IdeologyTag).filter(func.lower(IdeologyTag.name) == payload.name.lower()).first()
+    if exists:
+        raise AppError(code="RESOURCE_CONFLICT", message="标签已存在", status_code=409)
+    t = IdeologyTag(
+        name=payload.name,
+        sort_order=payload.sort_order or 0,
+        is_active=True if payload.is_active is None else payload.is_active,
+    )
+    db.add(t)
+    db.commit()
+    return created(request, {"id": t.id})
+
+
+@router.patch("/meta/tags/{tid}")
+def patch_tag(tid: int, payload: TagPatchIn, request: Request, db: Session = Depends(get_db), admin: User = Depends(require_roles("admin"))):
+    t = db.query(IdeologyTag).filter(IdeologyTag.id == tid).first()
+    if not t:
+        raise AppError(code="RESOURCE_NOT_FOUND", message="标签不存在", status_code=404)
+    data = payload.model_dump(exclude_unset=True)
+    if "sort_order" in data and data["sort_order"] is None:
+        data.pop("sort_order")
+    if "is_active" in data and data["is_active"] is None:
+        data.pop("is_active")
+    for k, v in data.items():
+        setattr(t, k, v)
+    db.commit()
+    return ok(request, {"id": t.id})
 
 
 @router.get("/reports/resources")
