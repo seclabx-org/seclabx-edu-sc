@@ -26,7 +26,9 @@ class ResourcePatchIn(BaseModel):
     group_id: int | None = None
     major_id: int | None = None
     course_id: int | None = None
+    course_name: str | None = None
     tag_ids: list[int] | None = None
+    tag_names: list[str] | None = None
     resource_type: str | None = None
     source_type: str | None = None
     file_type: str | None = None

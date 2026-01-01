@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from fastapi import Depends, Header
 from sqlalchemy.orm import Session
 from app.db.session import get_db
@@ -23,6 +24,13 @@ def get_current_user(db: Session = Depends(get_db), token: str = Depends(get_tok
     user = db.query(User).filter(User.id == int(uid), User.is_active == True).first()  # noqa: E712
     if not user:
         raise auth_invalid_credentials()
+    if user.password_changed_at:
+        iat = payload.get("iat")
+        if not iat:
+            raise auth_invalid_credentials()
+        token_time = datetime.fromtimestamp(int(iat), timezone.utc)
+        if token_time < user.password_changed_at:
+            raise auth_invalid_credentials()
     return user
 
 
@@ -39,4 +47,14 @@ def get_optional_user(
         return None
     if not uid:
         return None
-    return db.query(User).filter(User.id == int(uid), User.is_active == True).first()  # noqa: E712
+    user = db.query(User).filter(User.id == int(uid), User.is_active == True).first()  # noqa: E712
+    if not user:
+        return None
+    if user.password_changed_at:
+        iat = payload.get("iat")
+        if not iat:
+            return None
+        token_time = datetime.fromtimestamp(int(iat), timezone.utc)
+        if token_time < user.password_changed_at:
+            return None
+    return user

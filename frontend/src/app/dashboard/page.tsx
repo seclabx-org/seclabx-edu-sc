@@ -47,7 +47,12 @@ export default function DashboardHome() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold">教师工作台</h1>
+          <div className="flex items-center gap-3">
+            <h1 className="text-2xl font-semibold">教师工作台</h1>
+            <Link href="/dashboard/ai" className="text-2xl font-semibold text-slate-900 hover:text-brand">
+              AI工作台
+            </Link>
+          </div>
           <p className="text-sm text-slate-600">
             欢迎，{user.name}（{roleLabel}）
           </p>
@@ -79,6 +84,11 @@ export default function DashboardHome() {
           <li>
             <Link href="/dashboard/resources" className="text-brand hover:underline">
               我的资源
+            </Link>
+          </li>
+          <li>
+            <Link href="/dashboard/account" className="text-brand hover:underline">
+              修改密码
             </Link>
           </li>
           {isAdmin && (

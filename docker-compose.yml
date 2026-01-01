@@ -27,6 +27,7 @@ services:
         condition: service_healthy
     volumes:
       - ./data:/data
+      - ./frontend/public/sample-files:/data/sample-files:ro
 
   web:
     build:

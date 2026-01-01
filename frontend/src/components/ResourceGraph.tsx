@@ -45,6 +45,8 @@ export function ResourceGraph() {
   const zoomRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null);
   const [transform, setTransform] = useState<d3.ZoomTransform>(() => d3.zoomIdentity.scale(1));
   const initialTransformRef = useRef<d3.ZoomTransform | null>(null);
+  const initialNodesRef = useRef<GraphNode[] | null>(null);
+  const initialWarnRef = useRef<string | null>(null);
 
   const width = 820;
   const height = Math.min(780, Math.max(BASE_HEIGHT, 120 + nodes.length * 10));
@@ -94,6 +96,9 @@ export function ResourceGraph() {
     setError(null);
     setWarn(null);
     setNodeError(null);
+    initialTransformRef.current = null;
+    initialNodesRef.current = null;
+    initialWarnRef.current = null;
     try {
       const data = await resourceApi.summary({ level: "group", limit: MAX_CHILDREN, include_empty: "true" });
       const groups: any[] = data.items || [];
@@ -101,6 +106,7 @@ export function ResourceGraph() {
       if (groups.length === 0) {
         setNodes([]);
         setWarn("暂无资源");
+        initialWarnRef.current = "暂无资源";
         return;
       }
 
@@ -121,10 +127,14 @@ export function ResourceGraph() {
         current = current.concat({ ...groupNode, expanded: true }, majors);
       }
 
+      let initialWarn: string | null = null;
       if (current.length > IDEAL_MAX_NODES) {
-        safeWarn(`当前已加载 ${current.length} 个节点，建议收起部分层级（理想不超过 ${IDEAL_MAX_NODES} 个）`);
+        initialWarn = `当前已加载 ${current.length} 个节点，建议收起部分层级（理想不超过 ${IDEAL_MAX_NODES} 个）`;
+        safeWarn(initialWarn);
       }
       setNodes(current);
+      initialNodesRef.current = current.map((n) => ({ ...n }));
+      initialWarnRef.current = initialWarn;
     } catch (e: any) {
       setError(e.message || "加载图谱失败");
     } finally {
@@ -176,11 +186,12 @@ export function ResourceGraph() {
     return { positioned: positions, edges };
   }, [nodes, height, width]);
 
-  // 自动适配缩放到合适视野
+  // 自动适配缩放到合适视野（仅首次加载）
   useEffect(() => {
     if (!svgRef.current || !zoomRef.current) return;
     const ids = Object.keys(positioned);
     if (ids.length === 0) return;
+    if (initialTransformRef.current) return;
     let minX = Infinity;
     let maxX = -Infinity;
     let minY = Infinity;
@@ -192,12 +203,14 @@ export function ResourceGraph() {
       minY = Math.min(minY, y);
       maxY = Math.max(maxY, y);
     });
-    const boxWidth = maxX - minX || width;
-    const boxHeight = maxY - minY || height;
+    const boxWidth = Math.max(1, maxX - minX);
+    const boxHeight = Math.max(1, maxY - minY);
     const margin = 80;
     const scale = Math.min((width - margin) / boxWidth, (height - margin) / boxHeight, 1.1);
-    const tx = -minX + margin / 2 + VIEWBOX_X;
-    const ty = -minY + margin / 2 + VIEWBOX_Y;
+    const centerX = (minX + maxX) / 2 + VIEWBOX_X;
+    const centerY = (minY + maxY) / 2 + VIEWBOX_Y;
+    const tx = width / 2 - centerX * scale;
+    const ty = height / 2 - centerY * scale;
     const initial = d3.zoomIdentity.translate(tx, ty).scale(scale);
     initialTransformRef.current = initial;
     d3.select(svgRef.current).transition().duration(300).call(zoomRef.current.transform as any, initial);
@@ -294,6 +307,14 @@ export function ResourceGraph() {
 
   const resetView = () => {
     if (!svgRef.current || !zoomRef.current) return;
+    if (initialNodesRef.current) {
+      setNodes(initialNodesRef.current.map((n) => ({ ...n })));
+      setSelected(null);
+      setError(null);
+      setNodeError(null);
+      setErroredNodes(new Set());
+      setWarn(initialWarnRef.current);
+    }
     const svg = d3.select(svgRef.current);
     const target = initialTransformRef.current || d3.zoomIdentity;
     svg.transition().duration(300).call(zoomRef.current.transform as any, target);

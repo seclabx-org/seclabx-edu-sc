@@ -55,6 +55,13 @@ export async function login(username: string, password: string) {
   return data;
 }
 
+export async function changePassword(old_password: string, new_password: string) {
+  return apiFetch("/auth/change-password", {
+    method: "POST",
+    body: JSON.stringify({ old_password, new_password }),
+  });
+}
+
 export const metaApi = {
   groups: () => apiFetch("/meta/groups"),
   majors: (groupId?: number) => apiFetch(`/meta/majors${groupId ? `?group_id=${groupId}` : ""}`),
@@ -71,6 +78,8 @@ export const resourceApi = {
     return apiFetch(`/resources${query.toString() ? `?${query.toString()}` : ""}`);
   },
   detail: (id: number) => apiFetch(`/resources/${id}`),
+  update: (id: number, payload: any) =>
+    apiFetch(`/resources/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),
   summary: (params: Record<string, string | number | undefined> = {}) => {
     const query = new URLSearchParams();
     Object.entries(params).forEach(([k, v]) => {
@@ -101,6 +110,10 @@ export const resourceApi = {
   archive: (id: number) => apiFetch(`/resources/${id}/archive`, { method: "POST" }),
   remove: (id: number) => apiFetch(`/resources/${id}`, { method: "DELETE" }),
   myFilters: () => apiFetch("/resources/my-filters"),
+  downloadAttachment: (id: number, attachmentId: number) =>
+    apiFetch(`/resources/${id}/attachments/${attachmentId}/download`),
+  deleteAttachment: (id: number, attachmentId: number) =>
+    apiFetch(`/resources/${id}/attachments/${attachmentId}`, { method: "DELETE" }),
 };
 
 export async function uploadFile(resourceId: number, file: File) {
@@ -128,6 +141,20 @@ export async function uploadCover(resourceId: number, file: File) {
   });
   const data = await resp.json().catch(() => null);
   if (!resp.ok) throw new Error(data?.error?.message || "封面上传失败");
+  return data.data;
+}
+
+export async function uploadAttachment(resourceId: number, file: File) {
+  const token = getToken();
+  const form = new FormData();
+  form.append("file", file);
+  const resp = await fetch(`${API_BASE}/resources/${resourceId}/attachments`, {
+    method: "POST",
+    body: form,
+    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+  });
+  const data = await resp.json().catch(() => null);
+  if (!resp.ok) throw new Error(data?.error?.message || "附件上传失败");
   return data.data;
 }
 

@@ -1,26 +1,35 @@
 ﻿"use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { usePathname, useSearchParams } from "next/navigation";
 import { resourceApi, metaApi } from "../../../lib/api";
 import { ResourceCard } from "../../../components/ResourceCard";
 import { useAuthGuard } from "../../../lib/useAuthGuard";
 
-export default function DashboardResources() {
+function DashboardResourcesInner() {
   const { user, loading } = useAuthGuard({ redirectTo: "/dashboard/resources" });
+  const searchParams = useSearchParams();
+  const pathname = usePathname();
   const [items, setItems] = useState<any[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [status, setStatus] = useState<string>("");
-  const [courseId, setCourseId] = useState<string>("");
-  const [tagId, setTagId] = useState<string>("");
+  const [status, setStatus] = useState<string>(searchParams.get("status") || "");
+  const [courseId, setCourseId] = useState<string>(searchParams.get("course_id") || "");
+  const [tagId, setTagId] = useState<string>(searchParams.get("tag_id") || "");
+  const [keyword, setKeyword] = useState<string>(searchParams.get("keyword") || "");
   const [courses, setCourses] = useState<any[]>([]);
   const [tags, setTags] = useState<any[]>([]);
+  const lastQueryKeyRef = useRef<string>("");
 
-  const load = () => {
+  const load = (force = false) => {
+    const queryKey = [status, courseId, tagId, keyword.trim(), user?.role || ""].join("|");
+    if (!force && queryKey === lastQueryKeyRef.current) return;
+    lastQueryKeyRef.current = queryKey;
     const params: Record<string, any> = {
       status: status || undefined,
       course_id: courseId ? Number(courseId) : undefined,
       tag_id: tagId ? Number(tagId) : undefined,
+      keyword: keyword.trim() || undefined,
     };
     if (!(user?.role === "admin")) {
       params.mine = 1;
@@ -62,7 +71,24 @@ export default function DashboardResources() {
           });
       }
     }
-  }, [user, status, courseId, tagId]);
+  }, [user, status, courseId, tagId, keyword]);
+
+  useEffect(() => {
+    setStatus(searchParams.get("status") || "");
+    setCourseId(searchParams.get("course_id") || "");
+    setTagId(searchParams.get("tag_id") || "");
+    setKeyword(searchParams.get("keyword") || "");
+  }, [searchParams.toString()]);
+
+  const backTarget = useMemo(() => {
+    const params = new URLSearchParams();
+    if (status) params.set("status", status);
+    if (courseId) params.set("course_id", courseId);
+    if (tagId) params.set("tag_id", tagId);
+    if (keyword.trim()) params.set("keyword", keyword.trim());
+    const query = params.toString();
+    return `${pathname}${query ? `?${query}` : ""}`;
+  }, [status, courseId, tagId, keyword, pathname]);
 
   if (loading) {
     return <div className="rounded border bg-white p-4 text-sm text-slate-600">正在校验登录...</div>;
@@ -121,7 +147,16 @@ export default function DashboardResources() {
             ))}
           </select>
         </label>
-        <button onClick={load} className="rounded bg-brand px-3 py-2 text-sm text-white hover:opacity-90">
+        <label className="flex flex-col gap-1 text-xs text-slate-600">
+          关键字
+          <input
+            value={keyword}
+            onChange={(e) => setKeyword(e.target.value)}
+            placeholder="标题或摘要"
+            className="rounded border px-2 py-1 text-sm"
+          />
+        </label>
+        <button onClick={() => load(true)} className="rounded bg-brand px-3 py-2 text-sm text-white hover:opacity-90">
           应用筛选
         </button>
       </div>
@@ -129,11 +164,20 @@ export default function DashboardResources() {
         <p className="text-sm text-slate-600">暂无资源，点击“新建资源”开始上传。</p>
       ) : (
         <div className="space-y-3">
-          {items.map((item) => (
-            <ResourceCard key={item.id} item={item} href={`/dashboard/resources/${item.id}`} />
-          ))}
+          {items.map((item) => {
+            const href = `/dashboard/resources/${item.id}?back=${encodeURIComponent(backTarget)}`;
+            return <ResourceCard key={item.id} item={item} href={href} />;
+          })}
         </div>
       )}
     </div>
+  );
+}
+
+export default function DashboardResourcesPage() {
+  return (
+    <Suspense fallback={<div className="rounded border bg-white p-4 text-sm text-slate-600">加载中...</div>}>
+      <DashboardResourcesInner />
+    </Suspense>
   );
 }

@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     # Upload
     UPLOAD_DIR: str = "/data/uploads"
     MAX_UPLOAD_MB: int = 200
-    ALLOWED_FILE_EXT: str = "pdf,pptx,docx,xlsx,mp4,png,jpg,zip"
+    ALLOWED_FILE_EXT: str = "pdf,pptx,docx,xlsx,mp4,mp3,png,jpg,jpeg,zip"
 
     # Signed download
     SIGNED_URL_SECRET: str
@@ -40,6 +40,11 @@ class Settings(BaseSettings):
     LOG_DIR: str = "/data/logs"
     LOG_LEVEL: str = "INFO"
     LOG_RETENTION_DAYS: int = 14
+
+    # AI (AiHubMix OpenAI compatible)
+    AIHUBMIX_API_KEY: str | None = None
+    AIHUBMIX_BASE_URL: str = "https://aihubmix.com/v1"
+    AIHUBMIX_CHAT_MODEL: str = "gemini-3-flash-preview-free"
 
     # Seed
     SEED_SAMPLE_DATA: bool = True

@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
 from sqlalchemy import func, or_
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 from collections import deque
 from pathlib import Path
 from app.db.session import get_db
@@ -163,6 +163,7 @@ def reset_password(
         raise AppError(code="FORBIDDEN", message="默认管理员账号禁止重置密码", status_code=403)
     new_pwd = generate_strong_password()
     u.password_hash = hash_password(new_pwd)
+    u.password_changed_at = datetime.now(timezone.utc)
     db.commit()
     _audit("reset_password", admin, u, request)
     return ok(request, AdminResetPasswordOut(id=u.id, username=u.username, new_password=new_pwd).model_dump())

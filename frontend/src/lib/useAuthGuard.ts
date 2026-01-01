@@ -9,6 +9,7 @@ export type AuthedUser = {
   username: string;
   name: string;
   role: string;
+  group_id?: number | null;
   major_id?: number | null;
 };
 

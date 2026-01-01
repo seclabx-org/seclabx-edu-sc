@@ -5,7 +5,6 @@ export type ResourceItem = {
   title: string;
   abstract: string;
   resource_type?: string;
-  source_type?: string;
   group_name?: string | null;
   major_name?: string | null;
   course_name?: string | null;
@@ -52,11 +51,6 @@ export function ResourceCard({ item, href }: { item: ResourceItem; href?: string
     practice: "bg-slate-100 text-slate-700",
     link: "bg-indigo-50 text-indigo-700",
   };
-  const sourceLabel: Record<string, string> = { upload: "上传", url: "外链" };
-  const sourceClass: Record<string, string> = {
-    upload: "bg-emerald-50 text-emerald-700",
-    url: "bg-indigo-50 text-indigo-700",
-  };
   const cover = item.cover_url || "/sample-covers/default-cover.jpg";
   const metaLine = [item.group_name, item.major_name].filter(Boolean).join(" · ");
 
@@ -83,11 +77,6 @@ export function ResourceCard({ item, href }: { item: ResourceItem; href?: string
             {item.resource_type && (
               <span className={`rounded px-2 py-1 ${typeClass[item.resource_type] || "bg-slate-100 text-slate-700"}`}>
                 {typeLabel[item.resource_type] || item.resource_type}
-              </span>
-            )}
-            {item.source_type && (
-              <span className={`rounded px-2 py-1 ${sourceClass[item.source_type] || "bg-slate-100 text-slate-700"}`}>
-                {sourceLabel[item.source_type] || item.source_type}
               </span>
             )}
             {item.owner?.name && <span className="rounded bg-slate-100 px-2 py-1 text-slate-700">发布者：{item.owner.name}</span>}

@@ -1,9 +1,9 @@
 ﻿"use client";
 
 import { useEffect, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { resourceApi, uploadFile } from "../../../../lib/api";
+import { resourceApi } from "../../../../lib/api";
 import { useAuthGuard } from "../../../../lib/useAuthGuard";
 
 const statusLabel: Record<string, string> = {
@@ -14,12 +14,24 @@ const statusLabel: Record<string, string> = {
 export default function ResourceDetailPage() {
   const params = useParams();
   const id = Number(params?.id);
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const { user, loading } = useAuthGuard();
   const [data, setData] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
-  const [uploading, setUploading] = useState(false);
   const [info, setInfo] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const rawBack = searchParams.get("back");
+  const backTarget = (() => {
+    if (!rawBack) return null;
+    let decoded = rawBack;
+    try {
+      decoded = decodeURIComponent(rawBack);
+    } catch {
+      decoded = rawBack;
+    }
+    return decoded.startsWith("/") ? decoded : null;
+  })();
 
   const load = () => {
     resourceApi
@@ -33,20 +45,6 @@ export default function ResourceDetailPage() {
       load();
     }
   }, [id]);
-
-  const handleUpload = async (file: File) => {
-    setUploading(true);
-    setInfo(null);
-    try {
-      await uploadFile(id, file);
-      setInfo("上传成功");
-      load();
-    } catch (e: any) {
-      setError(e.message || "上传失败");
-    } finally {
-      setUploading(false);
-    }
-  };
 
   const handlePublish = async () => {
     await resourceApi.publish(id);
@@ -83,6 +81,24 @@ export default function ResourceDetailPage() {
     }
   };
 
+  const handleAttachmentDownload = async (attachmentId: number) => {
+    try {
+      const res = await resourceApi.downloadAttachment(id, attachmentId);
+      if (res.download_url) {
+        window.open(res.download_url, "_blank");
+      }
+    } catch (e: any) {
+      setError(e.message || "附件下载失败");
+    }
+  };
+  const handleBack = () => {
+    if (backTarget) {
+      router.push(backTarget);
+      return;
+    }
+    router.back();
+  };
+
   if (loading) return <p className="text-sm text-slate-600">正在校验登录状态...</p>;
   if (error) {
     return (
@@ -98,6 +114,7 @@ export default function ResourceDetailPage() {
 
   const isAdmin = user?.role === "admin";
   const isOwner = Boolean(data?.can_edit);
+  const canEditDraft = Boolean(data?.can_edit) && data.status === "draft";
   const canPublish = Boolean(data?.can_publish ?? ((isAdmin || isOwner) && data.status !== "published"));
   const canArchive = Boolean(data?.can_archive ?? ((isAdmin || isOwner) && data.status === "published"));
   const canDelete =
@@ -108,22 +125,49 @@ export default function ResourceDetailPage() {
     const d = new Date(v);
     return isNaN(d.getTime()) ? v : d.toLocaleString("zh-CN", { hour12: false, timeZone: "Asia/Shanghai" });
   };
+const formatBytes = (bytes?: number | null) => {
+  if (!bytes || bytes <= 0) return "0 KB";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 ** 2) return `${Math.round(bytes / 1024)} KB`;
+  if (bytes < 1024 ** 3) return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
+  return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
+};
+
+const formatDuration = (seconds?: number | null) => {
+  if (!seconds || seconds <= 0) return "未识别";
+  const total = Math.round(seconds);
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const secs = total % 60;
+  if (hours > 0) return `${hours}小时${minutes}分${secs}秒`;
+  if (minutes > 0) return `${minutes}分${secs}秒`;
+  return `${secs}秒`;
+};
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
+          <button
+            onClick={handleBack}
+            className="inline-flex items-center gap-1 text-sm text-slate-600 hover:text-slate-900"
+          >
+            ← 返回
+          </button>
           <h1 className="text-2xl font-semibold">{data.title}</h1>
           <p className="text-sm text-slate-600">状态：{statusLabel[data.status] || data.status}</p>
-          <p className="text-xs text-slate-500">
-            类型：{data.resource_type || "未填写"} · 来源：{data.source_type === "url" ? "外链" : "上传"}
-          </p>
+          <p className="text-xs text-slate-500">类型：{data.resource_type || "未填写"}</p>
         </div>
         <div className="flex gap-2">
           {data.can_download && (
             <button onClick={handleDownload} className="rounded-md border px-3 py-2 text-sm text-brand border-brand">
               下载
             </button>
+          )}
+          {canEditDraft && (
+            <Link href={`/dashboard/resources/new?edit=${id}`} className="rounded-md border px-3 py-2 text-sm text-slate-700">
+              编辑
+            </Link>
           )}
           {canPublish && (
             <button onClick={handlePublish} className="rounded-md bg-brand px-3 py-2 text-sm text-white">
@@ -152,7 +196,6 @@ export default function ResourceDetailPage() {
           <h3 className="text-sm font-semibold text-slate-800">基本信息</h3>
           <ul className="mt-2 space-y-1 text-sm text-slate-700">
             <li>类型：{data.resource_type || "未填写"}</li>
-            <li>来源：{data.source_type === "url" ? "外链" : "上传"}</li>
             <li>专业群：{data.group_name || "未填写"}</li>
             <li>专业：{data.major_name || "未填写"}</li>
             <li>课程：{data.course_name || "未填写"}</li>
@@ -161,31 +204,48 @@ export default function ResourceDetailPage() {
             <li>发布时间：{data.published_at ? formatTime(data.published_at) : "未发布"}</li>
             <li>下载次数：{data.download_count ?? 0}</li>
             <li>面向人群：{data.audience || "未填写"}</li>
-            <li>时长：{data.duration_seconds ? `${Math.round(data.duration_seconds / 60)} 分钟` : "未填写"}</li>
+            {(data.resource_type === "video" || data.resource_type === "audio") && (
+              <li>时长：{formatDuration(data.duration_seconds)}</li>
+            )}
           </ul>
         </div>
         <div className="rounded-lg border bg-white p-4">
           <h3 className="text-sm font-semibold text-slate-800">文件</h3>
-          {data.file ? (
+          {data.source_type === "url" ? (
+            <div className="text-sm text-slate-700">
+              <p>链接：{data.external_url || "未填写"}</p>
+            </div>
+          ) : data.file ? (
             <div className="text-sm text-slate-700">
               <p>名称：{data.file.name}</p>
-              <p>大小：{Math.round((data.file.size_bytes || 0) / 1024)} KB</p>
-              <p>类型：{data.file.mime}</p>
+              <p>大小：{formatBytes(data.file.size_bytes)}</p>
             </div>
           ) : (
             <p className="text-sm text-slate-600">尚未上传文件。</p>
           )}
-          {isOwner && (
-            <div className="mt-3">
-              <label className="text-sm text-slate-700">上传文件</label>
-              <input
-                type="file"
-                onChange={(e) => e.target.files && handleUpload(e.target.files[0])}
-                className="mt-2 block w-full text-sm"
-                disabled={uploading}
-              />
-              {info && <p className="text-xs text-green-700">{info}</p>}
+          {info && <p className="mt-2 text-xs text-green-700">{info}</p>}
+        </div>
+        <div className="rounded-lg border bg-white p-4">
+          <h3 className="text-sm font-semibold text-slate-800">附件</h3>
+          {Array.isArray(data.attachments) && data.attachments.length > 0 ? (
+            <div className="mt-2 space-y-2 text-sm text-slate-700">
+              {data.attachments.map((att: any) => (
+                <div key={att.id} className="flex flex-wrap items-center justify-between gap-2 rounded border border-slate-200 px-3 py-2">
+                  <div>
+                    <p>名称：{att.name}</p>
+                    <p className="text-xs text-slate-500">大小：{formatBytes(att.size_bytes)}</p>
+                  </div>
+                  <button
+                    onClick={() => handleAttachmentDownload(att.id)}
+                    className="rounded-md border px-3 py-1 text-xs text-brand border-brand"
+                  >
+                    下载
+                  </button>
+                </div>
+              ))}
             </div>
+          ) : (
+            <p className="text-sm text-slate-600">暂无附件。</p>
           )}
         </div>
       </div>

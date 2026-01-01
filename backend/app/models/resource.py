@@ -35,6 +35,7 @@ class Resource(Base):
     external_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     cover_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     duration_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    duration_source: Mapped[str | None] = mapped_column(String(20), nullable=True)
     audience: Mapped[str | None] = mapped_column(String(100), nullable=True)
     status: Mapped[str] = mapped_column(String(20), default="draft", nullable=False)
     owner_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)

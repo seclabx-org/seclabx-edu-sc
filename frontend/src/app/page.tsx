@@ -34,6 +34,9 @@ export default function Home() {
           <Link className="rounded-md border border-white/60 px-4 py-2 font-medium text-white" href="/dashboard">
             教师工作台
           </Link>
+          <Link className="rounded-md border border-white/60 px-4 py-2 font-medium text-white" href="/dashboard/ai">
+            AI工作台
+          </Link>
         </div>
       </section>
 

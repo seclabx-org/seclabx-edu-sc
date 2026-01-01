@@ -24,8 +24,9 @@ def create_access_token(subject: dict, expires_in_seconds: int | None = None) ->
     subject: {"id": int, "role": str}
     PyJWT requires `sub` to be a string, so we keep `role` as a separate claim.
     """
-    exp = int(time.time()) + int(expires_in_seconds or settings.ACCESS_TOKEN_EXPIRES_SECONDS)
-    payload = {"sub": str(subject.get("id")), "role": subject.get("role"), "exp": exp}
+    now = int(time.time())
+    exp = now + int(expires_in_seconds or settings.ACCESS_TOKEN_EXPIRES_SECONDS)
+    payload = {"sub": str(subject.get("id")), "role": subject.get("role"), "exp": exp, "iat": now}
     return jwt.encode(payload, settings.JWT_SECRET, algorithm=settings.JWT_ALG)
 
 

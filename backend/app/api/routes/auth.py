@@ -1,4 +1,5 @@
 import time
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
 from sqlalchemy import func
@@ -60,6 +61,7 @@ def me(request: Request, user: User = Depends(get_current_user)):
             "username": user.username,
             "name": user.name,
             "role": user.role,
+            "group_id": user.group_id,
             "major_id": user.major_id,
             "is_active": user.is_active,
             "last_login_at": user.last_login_at.isoformat() if user.last_login_at else None,
@@ -79,6 +81,7 @@ def change_password(
     if not validate_password_strength(payload.new_password):
         raise AppError(code="VALIDATION_ERROR", message="新密码不符合复杂度要求（至少8位，含大小写和数字）", status_code=400)
     user.password_hash = hash_password(payload.new_password)
+    user.password_changed_at = datetime.now(timezone.utc)
     db.commit()
     logger.info("User %s changed password", user.username)
     return ok(request, {"status": "ok"})

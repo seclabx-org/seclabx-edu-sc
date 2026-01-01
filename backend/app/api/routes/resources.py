@@ -6,6 +6,9 @@ import subprocess
 import tempfile
 import shutil
 from pathlib import Path
+import mimetypes
+from urllib.parse import urlparse
+import re
 from fastapi import APIRouter, Depends, Request, File, UploadFile
 from fastapi.responses import FileResponse
 from sqlalchemy import or_, func
@@ -19,6 +22,7 @@ from app.core.storage import is_oss_enabled, save_file_local, save_file_oss, gen
 from app.api.deps import get_current_user, get_optional_user
 from app.models.meta import ProfessionalGroup, Major, Course, IdeologyTag
 from app.models.resource import Resource, resource_tags
+from app.models.resource_attachment import ResourceAttachment
 from app.models.download import DownloadLog
 from app.models.user import User
 from app.schemas.resource import ResourceCreateIn, ResourcePatchIn
@@ -102,11 +106,35 @@ def _allowed_mimes() -> dict[str, set[str]]:
             "application/vnd.ms-excel",
         },
         "mp4": {"video/mp4", "application/mp4"},
+        "mp3": {"audio/mpeg", "audio/mp3"},
         "png": {"image/png"},
         "jpg": {"image/jpeg"},
         "jpeg": {"image/jpeg"},
         "zip": {"application/zip", "application/x-zip-compressed"},
     }
+
+def _validate_external_url(url: str) -> None:
+    if not url or len(url) > 2048:
+        raise validation_error("外链地址不合法")
+    lowered = url.strip().lower()
+    if lowered.startswith("javascript:") or lowered.startswith("data:"):
+        raise validation_error("外链协议不合法")
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise validation_error("外链仅支持 http:// 或 https://")
+
+def _normalize_ext(file_type: str | None, file_name: str | None) -> str:
+    value = (file_type or "").strip().lower()
+    if value.startswith("."):
+        value = value[1:]
+    if "/" in value:
+        guessed = mimetypes.guess_extension(value) or ""
+        if guessed.startswith("."):
+            guessed = guessed[1:]
+        value = guessed or value.split("/")[-1]
+    if not value and file_name and "." in file_name:
+        value = file_name.rsplit(".", 1)[-1].lower()
+    return value
 
 
 def _calc_can_download(user: User, r: Resource) -> bool:
@@ -130,19 +158,189 @@ def _calc_can_edit(user: User, r: Resource) -> bool:
 def _probe_duration(path: str) -> int | None:
     """使用 ffprobe 探测音视频时长（秒）。"""
     try:
-        res = subprocess.run([
+        def _run(args: list[str]) -> int | None:
+            res = subprocess.run(
+                args,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=True,
+            )
+            out = res.stdout.decode().strip()
+            if not out:
+                return None
+            try:
+                seconds = float(out)
+            except ValueError:
+                return None
+            if seconds <= 0:
+                return None
+            return int(round(seconds))
+
+        def _run_kv(args: list[str]) -> dict[str, str]:
+            res = subprocess.run(
+                args,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=True,
+            )
+            out = res.stdout.decode().strip()
+            data: dict[str, str] = {}
+            for line in out.splitlines():
+                if "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                data[key.strip()] = value.strip()
+            return data
+
+        def _duration_from_ts(info: dict[str, str]) -> int | None:
+            duration_ts = info.get("duration_ts")
+            time_base = info.get("time_base")
+            if not duration_ts or not time_base or "/" not in time_base:
+                return None
+            try:
+                num, den = time_base.split("/", 1)
+                base = float(num) / float(den)
+                seconds = float(duration_ts) * base
+            except (ValueError, ZeroDivisionError):
+                return None
+            if seconds <= 0:
+                return None
+            return int(round(seconds))
+
+        def _duration_from_frames(info: dict[str, str]) -> int | None:
+            frames = info.get("nb_frames") or info.get("nb_read_frames")
+            rate = info.get("avg_frame_rate")
+            if not frames or not rate or "/" not in rate:
+                return None
+            try:
+                frames_val = float(frames)
+            except ValueError:
+                return None
+            try:
+                num, den = rate.split("/", 1)
+                fps = float(num) / float(den)
+            except (ValueError, ZeroDivisionError):
+                return None
+            if fps <= 0:
+                return None
+            seconds = frames_val / fps
+            if seconds <= 0:
+                return None
+            return int(round(seconds))
+
+        def _duration_from_samples(info: dict[str, str]) -> int | None:
+            samples = info.get("nb_samples")
+            rate = info.get("sample_rate")
+            if not samples or not rate:
+                return None
+            try:
+                samples_val = float(samples)
+                rate_val = float(rate)
+            except ValueError:
+                return None
+            if rate_val <= 0:
+                return None
+            seconds = samples_val / rate_val
+            if seconds <= 0:
+                return None
+            return int(round(seconds))
+
+        base = [
             "ffprobe",
             "-v",
             "error",
-            "-show_entries",
-            "format=duration",
             "-of",
             "default=noprint_wrappers=1:nokey=1",
-            path,
-        ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
-        out = res.stdout.decode().strip()
-        seconds = float(out)
-        return int(seconds)
+        ]
+        duration = (
+            _run(base + ["-show_entries", "format=duration", path])
+            or _run(base + ["-select_streams", "v:0", "-show_entries", "stream=duration", path])
+            or _run(base + ["-select_streams", "a:0", "-show_entries", "stream=duration", path])
+            or _duration_from_ts(
+                _run_kv(
+                    [
+                        "ffprobe",
+                        "-v",
+                        "error",
+                        "-select_streams",
+                        "v:0",
+                        "-show_entries",
+                        "stream=duration_ts,time_base",
+                        "-of",
+                        "default=noprint_wrappers=1:nokey=0",
+                        path,
+                    ]
+                )
+            )
+            or _duration_from_ts(
+                _run_kv(
+                    [
+                        "ffprobe",
+                        "-v",
+                        "error",
+                        "-select_streams",
+                        "a:0",
+                        "-show_entries",
+                        "stream=duration_ts,time_base",
+                        "-of",
+                        "default=noprint_wrappers=1:nokey=0",
+                        path,
+                    ]
+                )
+            )
+            or _duration_from_frames(
+                _run_kv(
+                    [
+                        "ffprobe",
+                        "-v",
+                        "error",
+                        "-select_streams",
+                        "v:0",
+                        "-show_entries",
+                        "stream=nb_frames,nb_read_frames,avg_frame_rate",
+                        "-of",
+                        "default=noprint_wrappers=1:nokey=0",
+                        path,
+                    ]
+                )
+            )
+            or _duration_from_samples(
+                _run_kv(
+                    [
+                        "ffprobe",
+                        "-v",
+                        "error",
+                        "-select_streams",
+                        "a:0",
+                        "-show_entries",
+                        "stream=nb_samples,sample_rate",
+                        "-of",
+                        "default=noprint_wrappers=1:nokey=0",
+                        path,
+                    ]
+                )
+            )
+        )
+        if duration:
+            return duration
+        try:
+            res = subprocess.run(
+                ["ffmpeg", "-hide_banner", "-i", path],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            output = (res.stderr or b"").decode(errors="ignore") + (res.stdout or b"").decode(errors="ignore")
+            match = re.search(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)", output)
+            if match:
+                hours = int(match.group(1))
+                minutes = int(match.group(2))
+                seconds = float(match.group(3))
+                total = hours * 3600 + minutes * 60 + seconds
+                if total > 0:
+                    return int(round(total))
+        except Exception:
+            return None
+        return None
     except Exception:
         return None
 
@@ -213,6 +411,17 @@ def _enrich_names(db: Session, r: Resource):
         "course_name": course.name if course else None,
         "tag_ids": [t.id for t in tag_rows],
         "tag_names": [t.name for t in tag_rows],
+    }
+
+
+def _attachment_out(a: ResourceAttachment) -> dict:
+    return {
+        "id": a.id,
+        "name": a.file_name,
+        "size_bytes": a.file_size_bytes,
+        "mime": a.file_mime,
+        "sha256": a.file_sha256,
+        "created_at": a.created_at.isoformat() if a.created_at else None,
     }
 
 
@@ -575,6 +784,12 @@ def get_resource(
 
     names = _enrich_names(db, r)
     owner = db.query(User).filter(User.id == r.owner_user_id).first()
+    attachments = (
+        db.query(ResourceAttachment)
+        .filter(ResourceAttachment.resource_id == r.id)
+        .order_by(ResourceAttachment.created_at.asc())
+        .all()
+    )
     can_manage = bool(user and (user.role == "admin" or r.owner_user_id == user.id))
     can_publish = can_manage and r.status != "published"
     can_archive = can_manage and r.status == "published"
@@ -606,6 +821,7 @@ def get_resource(
         "cover_url": cover_out,
         "duration_seconds": r.duration_seconds,
         "audience": r.audience,
+        "attachments": [_attachment_out(a) for a in attachments],
     }
 
     if user:
@@ -645,10 +861,15 @@ def preview_resource(
     if user.role != "admin" and not (r.status == "published" or r.owner_user_id == user.id):
         raise permission_denied()
 
-    ext = (r.file_type or "").lower()
+    ext = _normalize_ext(r.file_type, r.file_name)
     mime = r.file_mime or "application/octet-stream"
+    raw_type = ((r.file_type or "") + " " + (r.file_mime or "")).lower()
+    if "zip" in raw_type or (r.file_name or "").lower().endswith(".zip"):
+        return ok(request, {"mode": "unsupported", "note": "压缩包暂不支持在线预览，请下载查看", "mime": mime, "ext": "zip"})
     inline_types = {"png", "jpg", "jpeg", "gif", "webp", "pdf", "mp4", "mp3"}
     office_types = {"pptx", "docx", "xlsx"}
+    if ext == "zip":
+        return ok(request, {"mode": "unsupported", "note": "压缩包暂不支持在线预览，请下载查看", "mime": mime, "ext": ext})
 
     # 外链资源直接跳转
     # 外链资源：可直接内嵌展示的类型
@@ -673,7 +894,7 @@ def preview_resource(
             exp_ts = int(datetime.now(timezone.utc).timestamp()) + settings.SIGNED_URL_EXPIRES_SECONDS
             sig = sign_download(r.file_id, exp_ts, user.id)
             base = str(request.base_url).rstrip("/")
-            preview_url = f"{base}/api/v1/files/signed/{r.file_id}?exp={exp_ts}&uid={user.id}&sig={sig}"
+            preview_url = f"{base}/api/v1/files/signed/{r.file_id}?exp={exp_ts}&uid={user.id}&sig={sig}&inline=1"
         if stream:
             # 直接回源文件
             path = _ensure_local_file(r)
@@ -750,8 +971,17 @@ def get_cover_file(
     if not r:
         raise not_found()
     # 封面为低敏感内容，允许公开访问；如需收紧可改为仅已发布或校验签名
-
-    path = _cover_local_path(file)
+    if not r.cover_url or not r.cover_url.startswith("local:"):
+        raise not_found()
+    filename = r.cover_url.replace("local:", "", 1)
+    if not file or file != filename:
+        raise not_found()
+    if any(part in file for part in ("/", "\\", "..")):
+        raise not_found()
+    base = _cover_local_path("").resolve()
+    path = _cover_local_path(filename).resolve()
+    if base not in path.parents and path != base:
+        raise not_found()
     if not path.exists():
         raise not_found()
     mime = "image/png" if path.suffix.lower() == ".png" else "image/jpeg"
@@ -775,6 +1005,7 @@ def create_resource(
     if payload.source_type == "url":
         if not payload.external_url:
             raise validation_error("外链模式必须提供 external_url")
+        _validate_external_url(payload.external_url)
     if payload.source_type == "upload" and payload.external_url:
         raise validation_error("上传模式下 external_url 必须为空")
 
@@ -782,6 +1013,7 @@ def create_resource(
     if status_val not in ALLOWED_STATUS:
         status_val = "draft"
     cover_val = payload.cover_url or _default_cover(payload.resource_type)
+    duration_source = "manual" if payload.duration_seconds is not None else None
 
     course_id = payload.course_id
     if not course_id and payload.course_name:
@@ -823,6 +1055,7 @@ def create_resource(
         external_url=payload.external_url,
         cover_url=cover_val,
         duration_seconds=payload.duration_seconds,
+        duration_source=duration_source,
         audience=payload.audience,
         status=status_val,
         owner_user_id=user.id,
@@ -856,18 +1089,82 @@ def patch_resource(
         if not (r.owner_user_id == user.id and r.status == "draft"):
             raise permission_denied()
 
-    for k, v in payload.model_dump(exclude_unset=True).items():
-        if k == "tag_ids":
+    update_data = payload.model_dump(exclude_unset=True)
+    if "duration_seconds" in update_data:
+        if update_data["duration_seconds"] is None:
+            update_data["duration_source"] = None
+        else:
+            update_data["duration_source"] = "manual"
+    new_source_type = update_data.get("source_type", r.source_type)
+    if new_source_type == "url":
+        new_external = update_data.get("external_url", r.external_url)
+        if not new_external:
+            raise validation_error("外链模式必须提供 external_url")
+        _validate_external_url(new_external)
+    if new_source_type == "upload" and update_data.get("external_url"):
+        raise validation_error("上传模式下 external_url 必须为空")
+    if "course_name" in update_data:
+        course_name = (update_data.get("course_name") or "").strip()
+        if course_name:
+            major_id = update_data.get("major_id") or r.major_id
+            if not major_id:
+                raise validation_error("请先选择专业")
+            course = db.query(Course).filter(Course.major_id == major_id, Course.name == course_name).first()
+            if not course:
+                course = Course(name=course_name, major_id=major_id, is_active=True)
+                db.add(course)
+                db.flush()
+            update_data["course_id"] = course.id
+        else:
+            update_data["course_id"] = update_data.get("course_id")
+
+    tag_ids = list(update_data.get("tag_ids") or [])
+    for name in update_data.get("tag_names") or []:
+        tag_name = name.strip()
+        if not tag_name:
+            continue
+        tag = db.query(IdeologyTag).filter(IdeologyTag.name == tag_name).first()
+        if not tag:
+            tag = IdeologyTag(name=tag_name, is_active=True)
+            db.add(tag)
+            db.flush()
+        tag_ids.append(tag.id)
+    tag_ids = list(dict.fromkeys(tag_ids))
+
+    for k, v in update_data.items():
+        if k in {"tag_ids", "tag_names", "course_name"}:
             continue
         if k == "resource_type" and v not in RESOURCE_TYPES:
             raise validation_error("资源类型不合法")
         setattr(r, k, v)
     r.updated_at = datetime.now(timezone.utc)
 
-    if payload.tag_ids is not None:
+    if update_data.get("tag_ids") is not None or update_data.get("tag_names") is not None:
         db.execute(resource_tags.delete().where(resource_tags.c.resource_id == r.id))
-        for tid in payload.tag_ids:
+        for tid in tag_ids:
             db.execute(resource_tags.insert().values(resource_id=r.id, tag_id=tid))
+
+    if (
+        "duration_seconds" not in update_data
+        and r.duration_seconds is None
+        and r.source_type != "url"
+        and r.file_id
+        and r.file_name
+    ):
+        ext = _normalize_ext(r.file_type, r.file_name)
+        mime = (r.file_mime or "").lower()
+        is_media = ext in {"mp4", "mp3", "wav", "m4a"} or mime.startswith(("video/", "audio/"))
+        if is_media:
+            try:
+                local_path = _ensure_local_file(r)
+                detected = _probe_duration(local_path)
+                if detected:
+                    r.duration_seconds = detected
+                    r.duration_source = "auto"
+                if is_oss_enabled():
+                    Path(local_path).unlink(missing_ok=True)
+            except Exception:
+                pass
 
     db.commit()
     return ok(request, {"id": r.id, "status": r.status})
@@ -897,6 +1194,9 @@ def upload_file(
     allowed_mimes = _allowed_mimes()
     if file.content_type and ext in allowed_mimes and file.content_type not in allowed_mimes[ext]:
         raise AppError(code="FILE_TYPE_NOT_ALLOWED", message="文件类型与扩展名不匹配", status_code=415)
+    is_media = ext in {"mp4", "mp3", "wav", "m4a"} or (
+        file.content_type and file.content_type.startswith(("video/", "audio/"))
+    )
 
     file_id = f"file_{uuid.uuid4().hex}"
     detected_duration: int | None = None
@@ -911,7 +1211,7 @@ def upload_file(
         r.file_size_bytes = size
         r.file_mime = file.content_type
         r.file_sha256 = sha
-        if ext in {"mp4", "mp3", "wav", "m4a"}:
+        if is_media:
             try:
                 local_path = download_oss_to_temp(key)
                 detected_duration = _probe_duration(local_path)
@@ -931,11 +1231,20 @@ def upload_file(
         r.file_size_bytes = size
         r.file_mime = file.content_type
         r.file_sha256 = sha
-        if ext in {"mp4", "mp3", "wav", "m4a"}:
+        if is_media:
             detected_duration = _probe_duration(str(storage_path))
 
-    if detected_duration:
-        r.duration_seconds = detected_duration
+    if is_media:
+        if detected_duration and detected_duration > 0:
+            r.duration_seconds = detected_duration
+            r.duration_source = "auto"
+        else:
+            if r.duration_source != "manual":
+                r.duration_seconds = None
+                r.duration_source = None
+    else:
+        r.duration_seconds = None
+        r.duration_source = None
     db.commit()
 
     return ok(
@@ -949,8 +1258,133 @@ def upload_file(
                 "sha256": r.file_sha256,
             },
             "status": r.status,
+            "duration_seconds": r.duration_seconds,
         },
     )
+
+
+@router.post("/{rid}/attachments")
+def upload_attachment(
+    rid: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+    file: UploadFile = File(...),
+):
+    r = db.query(Resource).filter(Resource.id == rid, Resource.deleted_at.is_(None)).first()
+    if not r:
+        raise not_found()
+
+    if user.role != "admin" and not (r.owner_user_id == user.id and r.status == "draft"):
+        raise permission_denied()
+
+    filename = _safe_filename(file.filename or "file")
+    ext = filename.split(".")[-1].lower() if "." in filename else ""
+    if ext not in _allowed_exts():
+        raise AppError(code="FILE_TYPE_NOT_ALLOWED", message="文件类型不允许上传", status_code=415)
+
+    max_bytes = settings.MAX_UPLOAD_MB * 1024 * 1024
+    allowed_mimes = _allowed_mimes()
+    if file.content_type and ext in allowed_mimes and file.content_type not in allowed_mimes[ext]:
+        raise AppError(code="FILE_TYPE_NOT_ALLOWED", message="文件类型与扩展名不匹配", status_code=415)
+
+    file_id = f"att_{uuid.uuid4().hex}"
+    if is_oss_enabled():
+        key = f"{file_id}_{filename}"
+        try:
+            size, sha = save_file_oss(file.file, key)
+        except ValueError:
+            raise AppError(code="FILE_TOO_LARGE", message="文件过大", status_code=413)
+        stored_id = key
+    else:
+        Path(settings.UPLOAD_DIR).mkdir(parents=True, exist_ok=True)
+        storage_name = f"{file_id}_{filename}"
+        storage_path = Path(settings.UPLOAD_DIR) / storage_name
+        try:
+            size, sha = save_file_local(file.file, str(storage_path), max_bytes)
+        except ValueError:
+            raise AppError(code="FILE_TOO_LARGE", message="文件过大", status_code=413)
+        stored_id = file_id
+
+    attachment = ResourceAttachment(
+        resource_id=r.id,
+        file_id=stored_id,
+        file_name=filename,
+        file_size_bytes=size,
+        file_mime=file.content_type,
+        file_sha256=sha,
+    )
+    db.add(attachment)
+    db.commit()
+    db.refresh(attachment)
+    return ok(request, {"attachment": _attachment_out(attachment)})
+
+
+@router.get("/{rid}/attachments/{aid}/download")
+def download_attachment(
+    rid: int,
+    aid: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    r = db.query(Resource).filter(Resource.id == rid, Resource.deleted_at.is_(None)).first()
+    if not r:
+        raise not_found()
+    if not _calc_can_download(user, r):
+        raise permission_denied()
+    attachment = (
+        db.query(ResourceAttachment)
+        .filter(ResourceAttachment.id == aid, ResourceAttachment.resource_id == rid)
+        .first()
+    )
+    if not attachment:
+        raise not_found()
+
+    if is_oss_enabled():
+        download_url = generate_oss_signed_url(attachment.file_id, settings.SIGNED_URL_EXPIRES_SECONDS)
+    else:
+        exp_ts = int(datetime.now(timezone.utc).timestamp()) + settings.SIGNED_URL_EXPIRES_SECONDS
+        sig = sign_download(attachment.file_id, exp_ts, user.id)
+        base = str(request.base_url).rstrip("/")
+        download_url = f"{base}/api/v1/files/signed/{attachment.file_id}?exp={exp_ts}&uid={user.id}&sig={sig}"
+    return ok(request, {"download_url": download_url, "expires_in": settings.SIGNED_URL_EXPIRES_SECONDS})
+
+
+@router.delete("/{rid}/attachments/{aid}")
+def delete_attachment(
+    rid: int,
+    aid: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    r = db.query(Resource).filter(Resource.id == rid, Resource.deleted_at.is_(None)).first()
+    if not r:
+        raise not_found()
+
+    if user.role != "admin" and not (r.owner_user_id == user.id and r.status == "draft"):
+        raise permission_denied()
+
+    attachment = (
+        db.query(ResourceAttachment)
+        .filter(ResourceAttachment.id == aid, ResourceAttachment.resource_id == rid)
+        .first()
+    )
+    if not attachment:
+        raise not_found()
+
+    if not is_oss_enabled():
+        storage_name = f"{attachment.file_id}_{attachment.file_name}"
+        storage_path = Path(settings.UPLOAD_DIR) / storage_name
+        try:
+            storage_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+    db.delete(attachment)
+    db.commit()
+    return no_content()
 
 @router.post("/{rid}/submit")
 def submit_resource(
@@ -1090,6 +1524,3 @@ def download_resource(
     base = str(request.base_url).rstrip("/")
     download_url = f"{base}/api/v1/files/signed/{r.file_id}?exp={exp_ts}&uid={user.id}&sig={sig}"
     return ok(request, {"download_url": download_url, "expires_in": settings.SIGNED_URL_EXPIRES_SECONDS})
-
-
-

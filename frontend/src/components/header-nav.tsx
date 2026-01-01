@@ -71,6 +71,7 @@ export function HeaderNav() {
     <nav className="flex items-center gap-3 text-sm">
       <Link href="/resources">资源目录</Link>
       {user && <Link href="/dashboard">教师工作台</Link>}
+      {user && <Link href="/dashboard/ai">AI工作台</Link>}
       {user?.role === "admin" && <Link href="/admin">管理后台</Link>}
       {user ? (
         <div className="flex items-center gap-2 rounded-md border border-brand/60 px-2 py-1">

@@ -1,8 +1,8 @@
-"use client";
+﻿"use client";
 
 import Link from "next/link";
 import { Suspense, useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import { metaApi, resourceApi } from "../../lib/api";
 import { ResourceCard, ResourceItem } from "../../components/ResourceCard";
 import { useAuthGuard } from "../../lib/useAuthGuard";
@@ -30,47 +30,58 @@ const sortOptions: SelectOption[] = [
 
 function ResourceListInner() {
   const searchParams = useSearchParams();
+  const pathname = usePathname();
   const initialGroup = searchParams.get("group_id");
   const initialMajor = searchParams.get("major_id");
   const initialCourse = searchParams.get("course_id");
   const initialType = searchParams.get("resource_type");
+  const initialKeyword = searchParams.get("keyword") || "";
+  const initialSort = searchParams.get("sort") || "created_at_desc";
+  const initialMine = searchParams.get("mine") === "1";
+  const initialPage = Number(searchParams.get("page") || "1");
+  const initialTag = searchParams.get("tag_id");
+  const pageSize = 10;
+
+  const { user } = useAuthGuard({ redirectTo: "/resources" });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [items, setItems] = useState<ResourceItem[]>([]);
   const [total, setTotal] = useState(0);
-  const [page, setPage] = useState(1);
-  const pageSize = 10;
-  const { user } = useAuthGuard({ redirectTo: "/resources" });
-  const [onlyMine, setOnlyMine] = useState(false);
+  const [page, setPage] = useState(initialPage > 0 ? initialPage : 1);
 
-  const initialTag = searchParams.get("tag_id");
-
-  const [keyword, setKeyword] = useState("");
+  const [keyword, setKeyword] = useState(initialKeyword);
   const [selectedType, setSelectedType] = useState(initialType || "");
   const [selectedGroup, setSelectedGroup] = useState<number | undefined>(initialGroup ? Number(initialGroup) : undefined);
   const [selectedMajor, setSelectedMajor] = useState<number | undefined>(initialMajor ? Number(initialMajor) : undefined);
   const [selectedCourse, setSelectedCourse] = useState<number | undefined>(initialCourse ? Number(initialCourse) : undefined);
   const [selectedTag, setSelectedTag] = useState<number | undefined>(initialTag ? Number(initialTag) : undefined);
-  const [sort, setSort] = useState("created_at_desc");
+  const [sort, setSort] = useState(initialSort);
+  const [onlyMine, setOnlyMine] = useState(initialMine);
 
   const [groups, setGroups] = useState<SelectOption[]>([{ value: "", label: "全部专业群" }]);
   const [majors, setMajors] = useState<SelectOption[]>([{ value: "", label: "全部专业" }]);
   const [courses, setCourses] = useState<SelectOption[]>([{ value: "", label: "全部课程" }]);
   const [tags, setTags] = useState<SelectOption[]>([{ value: "", label: "全部标签" }]);
 
-  // URL 变化时同步筛选
   useEffect(() => {
     const g = searchParams.get("group_id");
     const m = searchParams.get("major_id");
     const c = searchParams.get("course_id");
     const t = searchParams.get("resource_type");
     const tg = searchParams.get("tag_id");
+    const k = searchParams.get("keyword");
+    const s = searchParams.get("sort");
+    const mine = searchParams.get("mine");
+    const p = Number(searchParams.get("page") || "1");
     setSelectedGroup(g ? Number(g) : undefined);
     setSelectedMajor(m ? Number(m) : undefined);
     setSelectedCourse(c ? Number(c) : undefined);
     setSelectedType(t || "");
     setSelectedTag(tg ? Number(tg) : undefined);
-    setPage(1);
+    setKeyword(k || "");
+    setSort(s || "created_at_desc");
+    setOnlyMine(mine === "1");
+    setPage(p > 0 ? p : 1);
   }, [searchParams.toString()]);
 
   useEffect(() => {
@@ -83,14 +94,12 @@ function ResourceListInner() {
   }, []);
 
   useEffect(() => {
-    // 专业依赖专业群，但不在这里清空，清空放在选择事件中
     metaApi.majors(selectedGroup).then((data) => {
       setMajors([{ value: "", label: "全部专业" }, ...data.map((m: any) => ({ value: m.id, label: m.name }))]);
     });
   }, [selectedGroup]);
 
   useEffect(() => {
-    // 课程依赖专业
     if (selectedMajor) {
       metaApi.courses(selectedMajor).then((data) => {
         setCourses([{ value: "", label: "全部课程" }, ...data.map((c: any) => ({ value: c.id, label: c.name }))]);
@@ -130,6 +139,20 @@ function ResourceListInner() {
   }, [page, keyword, selectedType, selectedGroup, selectedMajor, selectedCourse, selectedTag, sort, onlyMine]);
 
   const totalPages = useMemo(() => Math.max(1, Math.ceil(total / pageSize)), [total, pageSize]);
+  const backTarget = useMemo(() => {
+    const params = new URLSearchParams();
+    if (keyword.trim()) params.set("keyword", keyword.trim());
+    if (selectedType) params.set("resource_type", selectedType);
+    if (selectedGroup) params.set("group_id", String(selectedGroup));
+    if (selectedMajor) params.set("major_id", String(selectedMajor));
+    if (selectedCourse) params.set("course_id", String(selectedCourse));
+    if (selectedTag) params.set("tag_id", String(selectedTag));
+    if (sort) params.set("sort", sort);
+    if (onlyMine) params.set("mine", "1");
+    if (page > 1) params.set("page", String(page));
+    const query = params.toString();
+    return `${pathname}${query ? `?${query}` : ""}`;
+  }, [keyword, selectedType, selectedGroup, selectedMajor, selectedCourse, selectedTag, sort, onlyMine, page, pathname]);
 
   const renderSelect = (
     label: string,
@@ -161,7 +184,7 @@ function ResourceListInner() {
       <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold text-slate-900">资源目录</h1>
-          <p className="text-sm text-slate-600">仅展示已发布资源；点击卡片可查看详情（需登录后访问详情/下载）。</p>
+          <p className="text-sm text-slate-600">仅展示已发布资源；点击卡片可查看详情（需登录后访问详情与下载）。</p>
         </div>
         <div className="flex gap-2">
           {!user && (
@@ -170,9 +193,14 @@ function ResourceListInner() {
             </Link>
           )}
           {user && (
-            <Link href="/dashboard" className="rounded bg-brand px-3 py-2 text-sm font-semibold text-white hover:opacity-90">
-              教师工作台
-            </Link>
+            <>
+              <Link href="/dashboard" className="rounded bg-brand px-3 py-2 text-sm font-semibold text-white hover:opacity-90">
+                教师工作台
+              </Link>
+              <Link href="/dashboard/ai" className="rounded bg-brand px-3 py-2 text-sm font-semibold text-white hover:opacity-90">
+                AI工作台
+              </Link>
+            </>
           )}
         </div>
       </div>
@@ -191,15 +219,25 @@ function ResourceListInner() {
           />
         </label>
         {renderSelect("类型", selectedType, (v) => setSelectedType(v), typeOptions)}
-        {renderSelect("专业群", selectedGroup, (v) => {
-          setSelectedGroup(v ? Number(v) : undefined);
-          setSelectedMajor(undefined);
-          setSelectedCourse(undefined);
-        }, groups)}
-        {renderSelect("专业", selectedMajor, (v) => {
-          setSelectedMajor(v ? Number(v) : undefined);
-          setSelectedCourse(undefined);
-        }, majors)}
+        {renderSelect(
+          "专业群",
+          selectedGroup,
+          (v) => {
+            setSelectedGroup(v ? Number(v) : undefined);
+            setSelectedMajor(undefined);
+            setSelectedCourse(undefined);
+          },
+          groups,
+        )}
+        {renderSelect(
+          "专业",
+          selectedMajor,
+          (v) => {
+            setSelectedMajor(v ? Number(v) : undefined);
+            setSelectedCourse(undefined);
+          },
+          majors,
+        )}
         {renderSelect("课程", selectedCourse, (v) => setSelectedCourse(v ? Number(v) : undefined), courses)}
         {renderSelect("标签", selectedTag, (v) => setSelectedTag(v ? Number(v) : undefined), tags)}
         {renderSelect("排序", sort, (v) => setSort(v), sortOptions)}
@@ -227,15 +265,16 @@ function ResourceListInner() {
       ) : (
         <div className="space-y-3">
           {items.length === 0 && <div className="rounded border bg-white p-4 text-sm text-slate-600">暂无资源，稍后再试。</div>}
-          {items.map((item) => (
-            <ResourceCard key={item.id} item={item} href={`/resources/${item.id}`} />
-          ))}
+          {items.map((item) => {
+            const href = `/resources/${item.id}?back=${encodeURIComponent(backTarget)}`;
+            return <ResourceCard key={item.id} item={item} href={href} />;
+          })}
         </div>
       )}
 
       <div className="flex items-center justify-between rounded border bg-white px-3 py-2 text-sm text-slate-700">
         <span>
-          第 {page}/{totalPages} 页 · 共 {total} 条
+          第{page}/{totalPages}页 · 共{total}条
         </span>
         <div className="flex gap-2">
           <button

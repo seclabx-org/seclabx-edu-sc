@@ -6,7 +6,7 @@ from app.core.logging import setup_logging
 from app.core.request_id import RequestIdMiddleware
 from app.core.response import err
 from app.core.errors import AppError
-from app.api.routes import auth, meta, resources, admin, files
+from app.api.routes import auth, meta, resources, admin, files, ai
 from app.db.auto_migrate import run_migrations_safely
 import logging
 
@@ -31,6 +31,7 @@ app.include_router(meta.router)
 app.include_router(resources.router)
 app.include_router(files.router)
 app.include_router(admin.router)
+app.include_router(ai.router)
 
 
 @app.on_event("startup")

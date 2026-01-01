@@ -19,6 +19,7 @@ services:
       - db
     volumes:
       - ./data/uploads:/data/uploads
+      - ./frontend/public/sample-files:/data/sample-files:ro
 
   web:
     image: crpi-7st94yd1uskrhjrz.cn-chengdu.personal.cr.aliyuncs.com/seclabx/seclabx-edu-sc-web:latest

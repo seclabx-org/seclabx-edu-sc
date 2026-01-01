@@ -7,7 +7,7 @@
 - 资源管理：发布/下架、外链或上传资源、签名下载、下载日志、标签/课程/专业群关联。
 - 教师工作台：草稿编辑、上传校验（类型白名单、大小限制）、发布申请。
 - 管理后台：用户管理（仅管理员可访问）。
-- 示例数据：默认创建专业群、专业、课程、标签，自动注入 6 条示例资源（封面位于 `frontend/public/sample-covers/`，资源路径 `frontend/public/sample-files/`）。
+- 示例数据：默认创建专业群、专业、课程、标签，并按标题去重注入示例资源（封面位于 `frontend/public/sample-covers/`，示例文件挂载到容器 `/data/sample-files`）。
 
 ## 快速启动（Docker）
 ```bash
@@ -22,6 +22,7 @@ docker compose up --build
 ```
 默认账号：`admin` / `Admin#123456`
 数据持久化：`data/db`（数据库）、`data/uploads`（本地上传文件）、`data/previews`（办公文档转 PDF 缓存）、`data/logs`（按天滚动日志）。
+示例文件：`frontend/public/sample-files` 会在 Docker 中只读挂载到 `/data/sample-files`，无需手动拷贝。
 
 ## 核心配置（backend/.env）
 必填：
@@ -35,7 +36,7 @@ ALLOW_ORIGINS=http://localhost:3000
 ```
 UPLOAD_DIR=/data/uploads
 MAX_UPLOAD_MB=200
-ALLOWED_FILE_EXT=pdf,pptx,docx,xlsx,mp4,png,jpg,zip
+ALLOWED_FILE_EXT=pdf,pptx,docx,xlsx,mp4,mp3,png,jpg,jpeg,zip
 SIGNED_URL_EXPIRES_SECONDS=60
 ```
 预览：
@@ -45,8 +46,19 @@ PREVIEW_DIR=/data/previews        # 办公文档转 PDF 的缓存目录
 LOG_DIR=/data/logs
 LOG_LEVEL=INFO
 LOG_RETENTION_DAYS=14
-SEED_SAMPLE_DATA=true          # 是否在初始化时注入示例资源（默认 true，设置为 false 则仅创建基础元数据）
+SEED_SAMPLE_DATA=true          # 是否在初始化时注入示例资源（默认 true；设置为 false 则仅创建基础元数据，不新增示例）
 ```
+
+AI（AiHubMix OpenAI 兼容）：
+```
+AIHUBMIX_API_KEY=你的密钥
+AIHUBMIX_BASE_URL=https://aihubmix.com/v1
+AIHUBMIX_CHAT_MODEL=gemini-3-flash-preview-free
+```
+
+提示：
+- `SEED_SAMPLE_DATA=false` 只会停止“新增示例”，不会删除已存在的示例数据；如需彻底不显示，可先手动清理示例记录或重建数据库。
+- 生产环境若不需要示例资源，建议关闭 `SEED_SAMPLE_DATA` 并移除示例文件挂载。
 
 ### 可选：阿里云 OSS 存储
 默认使用本地存储（`UPLOAD_DIR`）；如需切换 OSS：

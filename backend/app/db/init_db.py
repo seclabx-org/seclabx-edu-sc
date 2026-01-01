@@ -1,15 +1,21 @@
+import hashlib
+import mimetypes
 import time
 from datetime import datetime, timezone
+from pathlib import Path
+
 from sqlalchemy import text
 from sqlalchemy.orm import Session
-from app.db.session import engine, SessionLocal
-from app.models.base import Base
-from app.models.user import User
-from app.models.meta import ProfessionalGroup, Major, IdeologyTag, Course
-from app.models.resource import Resource  # noqa: F401 - ensure table registered
-from app.models.download import DownloadLog  # noqa: F401 - ensure table registered
-from app.core.security import hash_password
+
 from app.core.config import settings
+from app.core.security import hash_password
+from app.db.session import SessionLocal, engine
+from app.models.base import Base
+from app.models.download import DownloadLog  # noqa: F401 - ensure table registered
+from app.models.meta import Course, IdeologyTag, Major, ProfessionalGroup
+from app.models.resource import Resource  # noqa: F401 - ensure table registered
+from app.models.resource_attachment import ResourceAttachment  # noqa: F401 - ensure table registered
+from app.models.user import User
 
 GROUP_NAME = "信息安全技术应用专业群"
 
@@ -17,13 +23,25 @@ GROUP_NAME = "信息安全技术应用专业群"
 def migrate_resource_columns():
     """轻量迁移，确保新增字段存在。"""
     stmts = [
+        """CREATE TABLE IF NOT EXISTS resource_attachments (
+            id SERIAL PRIMARY KEY,
+            resource_id INTEGER NOT NULL REFERENCES resources(id) ON DELETE CASCADE,
+            file_id VARCHAR(100) NOT NULL,
+            file_name VARCHAR(255) NOT NULL,
+            file_size_bytes INTEGER,
+            file_mime VARCHAR(100),
+            file_sha256 VARCHAR(128),
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        )""",
         "ALTER TABLE resources ADD COLUMN IF NOT EXISTS resource_type VARCHAR(30) NOT NULL DEFAULT 'doc'",
         "ALTER TABLE resources ADD COLUMN IF NOT EXISTS cover_url VARCHAR(500)",
         "ALTER TABLE resources ADD COLUMN IF NOT EXISTS duration_seconds INTEGER",
+        "ALTER TABLE resources ADD COLUMN IF NOT EXISTS duration_source VARCHAR(20)",
         "ALTER TABLE resources ADD COLUMN IF NOT EXISTS audience VARCHAR(100)",
         "ALTER TABLE resources ADD COLUMN IF NOT EXISTS view_count INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE resources ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP WITH TIME ZONE",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS group_id INTEGER REFERENCES professional_groups(id)",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS password_changed_at TIMESTAMP WITH TIME ZONE",
         "ALTER TABLE professional_groups ADD COLUMN IF NOT EXISTS sort_order INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE courses ADD COLUMN IF NOT EXISTS sort_order INTEGER NOT NULL DEFAULT 0",
     ]
@@ -32,9 +50,45 @@ def migrate_resource_columns():
             conn.execute(text(sql))
 
 
+def _sha256(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _sample_file_candidates(filename: str) -> list[Path]:
+    repo_root = Path(__file__).resolve().parents[3]
+    upload_root = Path(settings.UPLOAD_DIR).resolve()
+    return [
+        upload_root / "sample-files" / filename,
+        upload_root.parent / "sample-files" / filename,
+        repo_root / "frontend" / "public" / "sample-files" / filename,
+    ]
+
+
+def _attach_sample_file(r: Resource, filename: str) -> bool:
+    for candidate in _sample_file_candidates(filename):
+        if not candidate.exists():
+            continue
+        file_id = f"sample_{r.id}"
+        dest_dir = Path(settings.UPLOAD_DIR)
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        dest_path = dest_dir / f"{file_id}_{filename}"
+        if not dest_path.exists():
+            dest_path.write_bytes(candidate.read_bytes())
+        r.file_id = file_id
+        r.file_name = filename
+        r.file_size_bytes = dest_path.stat().st_size
+        r.file_mime = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+        r.file_sha256 = _sha256(dest_path)
+        return True
+    return False
+
+
 def seed(db: Session):
     """初始化基础数据与示例资源。"""
-    # 专业群 / 专业 / 标签 / 课程
     g = db.query(ProfessionalGroup).filter(ProfessionalGroup.name == GROUP_NAME).first()
     if not g:
         g = ProfessionalGroup(name=GROUP_NAME, code="sec_cluster", is_active=True)
@@ -80,7 +134,6 @@ def seed(db: Session):
                 db.flush()
             course_map[name] = c.id
 
-    # 默认管理员
     admin = db.query(User).filter(User.username == "admin").first()
     if not admin:
         admin = User(
@@ -99,7 +152,6 @@ def seed(db: Session):
         db.commit()
         return
 
-    # 示例资源：如未存在同名资源则插入（避免重复）
     if major_one and admin:
         course_one = db.query(Course).filter(Course.major_id == major_one.id).first()
         now = datetime.now(timezone.utc)
@@ -108,9 +160,8 @@ def seed(db: Session):
                 "title": "示例 · 网络安全法解读视频",
                 "abstract": "面向信息安全专业的示例视频资源，包含政策解读与课堂讨论点。",
                 "resource_type": "video",
-                "source_type": "url",
                 "file_type": "mp4",
-                "external_url": "/sample-files/demo-video.mp4",
+                "sample_file": "demo-video.mp4",
                 "cover_url": "/sample-covers/demo-cover-video.jpg",
                 "duration_seconds": 31,
                 "audience": "大一 / 教师示范",
@@ -121,9 +172,8 @@ def seed(db: Session):
                 "title": "示例 · 思政课件模板（网络安全）",
                 "abstract": "课件示例，含课堂讨论与思政要点。",
                 "resource_type": "slide",
-                "source_type": "url",
                 "file_type": "pptx",
-                "external_url": "/sample-files/demo-slide.pptx",
+                "sample_file": "demo-slide.pptx",
                 "cover_url": "/sample-covers/demo-cover-slide.jpg",
                 "duration_seconds": None,
                 "audience": "教师备课",
@@ -134,9 +184,8 @@ def seed(db: Session):
                 "title": "示例 · 网络安全法（官方PDF）",
                 "abstract": "政策法规 PDF 汇编，适用于课堂研讨。",
                 "resource_type": "policy",
-                "source_type": "url",
                 "file_type": "pdf",
-                "external_url": "/sample-files/demo-policy.pdf",
+                "sample_file": "demo-policy.pdf",
                 "cover_url": "/sample-covers/demo-cover-policy.jpg",
                 "duration_seconds": None,
                 "audience": "教师/学生",
@@ -147,9 +196,8 @@ def seed(db: Session):
                 "title": "示例 · 思政案例讲稿（网络伦理）",
                 "abstract": "文本讲稿示例，含案例与思政要点。",
                 "resource_type": "text",
-                "source_type": "url",
                 "file_type": "docx",
-                "external_url": "/sample-files/demo-text.docx",
+                "sample_file": "demo-text.docx",
                 "cover_url": "/sample-covers/demo-cover-text.jpg",
                 "duration_seconds": None,
                 "audience": "课堂讲授",
@@ -160,9 +208,8 @@ def seed(db: Session):
                 "title": "示例 · 思政微课音频（国家安全观）",
                 "abstract": "音频微课，适合课前预习或课后复盘。",
                 "resource_type": "audio",
-                "source_type": "url",
                 "file_type": "mp3",
-                "external_url": "/sample-files/demo-audio.mp3",
+                "sample_file": "demo-audio.mp3",
                 "cover_url": "/sample-covers/demo-cover-audio.jpg",
                 "duration_seconds": 32,
                 "audience": "学生自学",
@@ -173,14 +220,25 @@ def seed(db: Session):
                 "title": "示例 · 思政图片素材（网络安全宣传）",
                 "abstract": "海报与案例图片，可用于课堂展示。",
                 "resource_type": "image",
-                "source_type": "url",
                 "file_type": "jpg",
-                "external_url": "/sample-files/demo-image.jpg",
+                "sample_file": "demo-image.jpg",
                 "cover_url": "/sample-covers/demo-image-thumb.jpg",
                 "duration_seconds": None,
                 "audience": "课堂展示",
                 "course_name": "Web应用开发",
                 "tag_names": ["工匠精神", "网络伦理"],
+            },
+            {
+                "title": "示例 · 国家网信办政策链接",
+                "abstract": "权威政策外链示例，便于课堂引用。",
+                "resource_type": "link",
+                "file_type": "url",
+                "external_url": "https://www.cac.gov.cn/",
+                "cover_url": "/sample-covers/demo-cover-link.jpg",
+                "duration_seconds": None,
+                "audience": "课堂研讨",
+                "course_name": "操作系统安全",
+                "tag_names": ["国家安全"],
             },
         ]
         for res in demo_resources:
@@ -199,9 +257,9 @@ def seed(db: Session):
                 major_id=major_one.id,
                 course_id=course_id,
                 resource_type=res["resource_type"],
-                source_type=res["source_type"],
+                source_type="url" if res.get("external_url") else "upload",
                 file_type=res["file_type"],
-                external_url=res["external_url"],
+                external_url=res.get("external_url"),
                 cover_url=res["cover_url"],
                 duration_seconds=res["duration_seconds"],
                 audience=res["audience"],
@@ -214,6 +272,9 @@ def seed(db: Session):
             )
             db.add(r)
             db.flush()
+            sample_file = res.get("sample_file")
+            if sample_file:
+                _attach_sample_file(r, sample_file)
             tag_ids = []
             for name in res.get("tag_names") or []:
                 if name in tag_map:
