@@ -116,6 +116,16 @@ export const resourceApi = {
     apiFetch(`/resources/${id}/attachments/${attachmentId}`, { method: "DELETE" }),
 };
 
+export const aiApi = {
+  chat: (payload: { messages: Array<{ role: string; content: string }>; model?: string; session_id?: number | null }) =>
+    apiFetch("/ai/chat", { method: "POST", body: JSON.stringify(payload) }),
+  sessions: () => apiFetch("/ai/sessions"),
+  session: (id: number) => apiFetch(`/ai/sessions/${id}`),
+  createSession: (title?: string) =>
+    apiFetch("/ai/sessions", { method: "POST", body: JSON.stringify({ title }) }),
+  deleteSession: (id: number) => apiFetch(`/ai/sessions/${id}`, { method: "DELETE" }),
+};
+
 export async function uploadFile(resourceId: number, file: File) {
   const token = getToken();
   const form = new FormData();

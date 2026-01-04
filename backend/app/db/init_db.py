@@ -16,6 +16,7 @@ from app.models.meta import Course, IdeologyTag, Major, ProfessionalGroup
 from app.models.resource import Resource  # noqa: F401 - ensure table registered
 from app.models.resource_attachment import ResourceAttachment  # noqa: F401 - ensure table registered
 from app.models.user import User
+from app.models.ai_chat import AiChatSession, AiChatMessage  # noqa: F401 - ensure table registered
 
 GROUP_NAME = "信息安全技术应用专业群"
 

@@ -1,6 +1,7 @@
 import logging
 from app.db.session import engine
 from app.models.base import Base
+from app.models import ai_chat  # noqa: F401
 from app.db.init_db import migrate_resource_columns
 
 logger = logging.getLogger(__name__)

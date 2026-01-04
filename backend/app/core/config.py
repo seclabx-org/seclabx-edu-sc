@@ -45,6 +45,8 @@ class Settings(BaseSettings):
     AIHUBMIX_API_KEY: str | None = None
     AIHUBMIX_BASE_URL: str = "https://aihubmix.com/v1"
     AIHUBMIX_CHAT_MODEL: str = "gemini-3-flash-preview-free"
+    AI_CHAT_MAX_SESSIONS: int = 20
+    AI_CHAT_MAX_MESSAGES: int = 100
 
     # Seed
     SEED_SAMPLE_DATA: bool = True
